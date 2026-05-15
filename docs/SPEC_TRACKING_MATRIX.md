@@ -1,6 +1,6 @@
 # Parley Spec Tracking Matrix
 
-Updated: 2026-05-14
+Updated: 2026-05-15
 
 Purpose: track the latest working version of each Parley spec across source docs and Whetstone run artifacts. The current working draft may be the source doc after apply-back or a Whetstone `spec.md` that has not yet been applied back to `docs/`.
 
@@ -8,7 +8,7 @@ Purpose: track the latest working version of each Parley spec across source docs
 
 - `Lineage tokens` and `Whetstone time` are cumulative across the tracked run roots listed in [Run Lineage Counted](#run-lineage-counted), not just the current/latest run.
 - `Whetstone time` uses Whetstone `telemetry_totals.total_duration_ms`, rounded to the nearest minute. It is telemetry wall time spent inside Whetstone runs, not human calendar time.
-- Total tracked Whetstone usage across this matrix: 29 run roots, 36,323,058 tokens, 38h 10m.
+- Total tracked Whetstone usage across this matrix: 37 run roots, 38,515,608 tokens, 39h 33m.
 - Legacy `*-mvp-003` runs are retained in lineage totals when they exist, even when the current working path has moved to the HLD-context rerun series.
 
 ## Status Legend
@@ -20,6 +20,7 @@ Purpose: track the latest working version of each Parley spec across source docs
 - `HALTED_CLIENT_TIMEOUT`: Phase 1 halted on a client timeout; resume only if Whetstone reports it as resumable.
 - `HALTED_OSCILLATION`: Phase 1 halted on oscillation and requires manual review.
 - `INCOMPLETE`: latest run artifacts are incomplete or failed validation and need continuation or repair before review.
+- `MANUAL_SYNTHESIS_PENDING_WHETSTONE`: source doc has been manually synthesized ahead of the tracked Whetstone draft and should receive a focused Whetstone verification pass before being treated as settled.
 - `NO_RUN_TRACKED`: no Whetstone run has been identified for this doc.
 
 ## Operator Recommendation Legend
@@ -46,12 +47,12 @@ Purpose: track the latest working version of each Parley spec across source docs
 
 ## Primary Matrix
 
-| Spec | Source doc | Current Whetstone draft | Current Whetstone status | Operator recommendation | Apply-back safety | Source relation | Decision pressure | Runs counted | Lineage tokens | Whetstone time | Decision count | Human decisions | Next action / notes |
+| Spec | Source doc | Current working draft | Current Whetstone status | Operator recommendation | Apply-back safety | Source relation | Decision pressure | Runs counted | Lineage tokens | Whetstone time | Decision count | Human decisions | Next action / notes |
 |---|---|---|---|---|---|---|---|---:|---:|---:|---:|---:|---|
 | HLD / Architecture | [docs/hld-architecture.md](hld-architecture.md) | [hld-architecture-mvp-001/spec.md](../whetstone_runs/hld-architecture-mvp-001/spec.md) | `CONVERGED` Phase 2 round 4 (`convergence_strict_check`) | `BUILD_TARGET` | `SOURCE_ALREADY_AUTHORITY` | `SOURCE_AHEAD_OF_RUN` | `medium` | 1 | 937,639 | 1h 08m | 19 | 14 | Source is authoritative and includes the post-apply MVP decision to defer paired-file mode / project-scope report roots. |
 | Spec Index | [docs/specs/00-spec-index.md](specs/00-spec-index.md) | [00-spec-index-mvp-003/spec.md](../whetstone_runs/00-spec-index-mvp-003/spec.md) | `CONTEXT_ONLY` from accidental Phase 1 run | `DEPENDENCY_CONTEXT_ONLY` | `DO_NOT_APPLY_DIRECTLY` | Not applied | `medium` | 1 | 651,153 | 0h 32m | 28 | 21 | Navigation/dependency context only; do not interpret the run as a failed implementation-spec pass. |
 | CLI Command | [docs/specs/01-cli-command-spec.md](specs/01-cli-command-spec.md) | [01-cli-command-spec-hld-mvp-012-phase1-final-sweep/spec.md](../whetstone_runs/01-cli-command-spec-hld-mvp-012-phase1-final-sweep/spec.md) | `CONVERGED` Phase 2 round 7 (`convergence_strict_check`) | `LEAN_REWRITE_RECOMMENDED` | `REVIEW_DECISIONS_FIRST` | `SOURCE_APPLIED` | `high` | 13 | 13,461,850 | 15h 56m | 66 | 65 | Applied back from the converged HLD-guided lineage, but decision pressure says treat it as a rich build source rather than a perfectly lean implementation contract. |
-| Project Artifact Schema | [docs/specs/02-project-artifact-schema-spec.md](specs/02-project-artifact-schema-spec.md) | [02-project-artifact-schema-spec-hld-mvp-001/spec.md](../whetstone_runs/02-project-artifact-schema-spec-hld-mvp-001/spec.md) | `TARGET_NOT_REACHED` Phase 1 round 15 | `NEEDS_SYNTHESIS` | `DO_NOT_APPLY_DIRECTLY` | Not applied | `extreme` | 2 | 3,353,990 | 3h 19m | 103 | 103 | Latest HLD-context Phase 1 did not reach target; continue from this run or do a bounded synthesis pass. |
+| Project Artifact Schema | [docs/specs/02-project-artifact-schema-spec.md](specs/02-project-artifact-schema-spec.md) | [docs/specs/02-project-artifact-schema-spec.md](specs/02-project-artifact-schema-spec.md) | `CONVERGED` Phase 2 round 14 (`scope_guard`, utility MVP closeout) | `BUILD_TARGET` | `REVIEW_DECISIONS_FIRST` | `SOURCE_APPLIED` | `medium` | 10 | 5,546,540 | 4h 41m | 12 | 12 | Applied back from the converged utility-MVP profile-set run. Build target is good, but review the 12 checkpointed decisions around report envelope, failure categories, schema versioning, TM boundary, and glossary severity before treating every detail as equally intentional. |
 | Parser Interface and Format | [docs/specs/03-parser-interface-format-spec.md](specs/03-parser-interface-format-spec.md) | [03-parser-interface-format-spec-hld-mvp-001/spec.md](../whetstone_runs/03-parser-interface-format-spec-hld-mvp-001/spec.md) | `TARGET_NOT_REACHED` Phase 1 round 20 | `NEEDS_SYNTHESIS` | `DO_NOT_APPLY_DIRECTLY` | Not applied | `extreme` | 2 | 3,054,874 | 3h 16m | 159 | 159 | Latest HLD-context Phase 1 did not reach target; continue/recheck with HLD authority. |
 | Placeholder and Token Integrity | [docs/specs/04-placeholder-token-integrity-spec.md](specs/04-placeholder-token-integrity-spec.md) | [04-placeholder-token-integrity-spec-hld-mvp-001/spec.md](../whetstone_runs/04-placeholder-token-integrity-spec-hld-mvp-001/spec.md) | `TARGET_NOT_REACHED` Phase 1 round 20 | `NEEDS_SYNTHESIS` | `DO_NOT_APPLY_DIRECTLY` | Not applied | `extreme` | 2 | 2,948,589 | 2h 51m | 147 | 147 | Latest HLD-context Phase 1 did not reach target; continue or synthesize likely hotspots. |
 | Confidence Model | [docs/specs/05-confidence-model-spec.md](specs/05-confidence-model-spec.md) | [05-confidence-model-spec-hld-mvp-001/spec.md](../whetstone_runs/05-confidence-model-spec-hld-mvp-001/spec.md) | `CONVERGED` Phase 2 round 8 (`convergence_strict_check`) | `LEAN_REWRITE_RECOMMENDED` | `REVIEW_DECISIONS_FIRST` | `SOURCE_APPLIED` | `extreme` | 2 | 3,191,459 | 2h 39m | 139 | 139 | Applied back from converged HLD-context run, but extreme decision pressure suggests using it as a source of accepted intent and simplifying during implementation. |
@@ -66,7 +67,7 @@ Purpose: track the latest working version of each Parley spec across source docs
 | HLD / Architecture | [`hld-architecture-mvp-001`](../whetstone_runs/hld-architecture-mvp-001) |
 | Spec Index | [`00-spec-index-mvp-003`](../whetstone_runs/00-spec-index-mvp-003) |
 | CLI Command | [`01-cli-command-spec-hld-mvp-001`](../whetstone_runs/01-cli-command-spec-hld-mvp-001)<br>[`01-cli-command-spec-hld-mvp-002-round29-closeout-check`](../whetstone_runs/01-cli-command-spec-hld-mvp-002-round29-closeout-check)<br>[`01-cli-command-spec-hld-mvp-003-determinism-continue`](../whetstone_runs/01-cli-command-spec-hld-mvp-003-determinism-continue)<br>[`01-cli-command-spec-hld-mvp-004-determinism-continue-timeout1800`](../whetstone_runs/01-cli-command-spec-hld-mvp-004-determinism-continue-timeout1800)<br>[`01-cli-command-spec-hld-mvp-005-determinism-synthesis`](../whetstone_runs/01-cli-command-spec-hld-mvp-005-determinism-synthesis)<br>[`01-cli-command-spec-hld-mvp-006-determinism-synthesis`](../whetstone_runs/01-cli-command-spec-hld-mvp-006-determinism-synthesis)<br>[`01-cli-command-spec-hld-mvp-007-validate-report-determinism`](../whetstone_runs/01-cli-command-spec-hld-mvp-007-validate-report-determinism)<br>[`01-cli-command-spec-hld-mvp-008-operability-check`](../whetstone_runs/01-cli-command-spec-hld-mvp-008-operability-check)<br>[`01-cli-command-spec-hld-mvp-009-operability-synthesis`](../whetstone_runs/01-cli-command-spec-hld-mvp-009-operability-synthesis)<br>[`01-cli-command-spec-hld-mvp-010-structural-integrity-check`](../whetstone_runs/01-cli-command-spec-hld-mvp-010-structural-integrity-check)<br>[`01-cli-command-spec-hld-mvp-011-structural-per-key-outcomes`](../whetstone_runs/01-cli-command-spec-hld-mvp-011-structural-per-key-outcomes)<br>[`01-cli-command-spec-hld-mvp-012-phase1-final-sweep`](../whetstone_runs/01-cli-command-spec-hld-mvp-012-phase1-final-sweep)<br>[`01-cli-command-spec-mvp-003`](../whetstone_runs/01-cli-command-spec-mvp-003) |
-| Project Artifact Schema | [`02-project-artifact-schema-spec-hld-mvp-001`](../whetstone_runs/02-project-artifact-schema-spec-hld-mvp-001)<br>[`02-project-artifact-schema-spec-mvp-003`](../whetstone_runs/02-project-artifact-schema-spec-mvp-003) |
+| Project Artifact Schema | [`02-project-artifact-schema-spec-hld-mvp-001`](../whetstone_runs/02-project-artifact-schema-spec-hld-mvp-001)<br>[`02-project-artifact-schema-spec-hld-mvp-002-lean-synthesis-check`](../whetstone_runs/02-project-artifact-schema-spec-hld-mvp-002-lean-synthesis-check)<br>[`02-project-artifact-schema-spec-hld-mvp-003-lean-synthesis-check`](../whetstone_runs/02-project-artifact-schema-spec-hld-mvp-003-lean-synthesis-check)<br>[`02-project-artifact-schema-spec-hld-mvp-004-lean-synthesis-determinism-check`](../whetstone_runs/02-project-artifact-schema-spec-hld-mvp-004-lean-synthesis-determinism-check)<br>[`02-project-artifact-schema-spec-hld-mvp-005-source-determinism-recheck`](../whetstone_runs/02-project-artifact-schema-spec-hld-mvp-005-source-determinism-recheck)<br>[`02-project-artifact-schema-spec-hld-mvp-006-inventory-hash-determinism-recheck`](../whetstone_runs/02-project-artifact-schema-spec-hld-mvp-006-inventory-hash-determinism-recheck)<br>[`02-project-artifact-schema-spec-hld-mvp-007-operability-recheck`](../whetstone_runs/02-project-artifact-schema-spec-hld-mvp-007-operability-recheck)<br>[`02-project-artifact-schema-spec-hld-mvp-008-operability-final-recheck`](../whetstone_runs/02-project-artifact-schema-spec-hld-mvp-008-operability-final-recheck)<br>[`02-project-artifact-schema-spec-hld-mvp-007-utility-mvp-phase1-sweep`](../whetstone_runs/02-project-artifact-schema-spec-hld-mvp-007-utility-mvp-phase1-sweep)<br>[`02-project-artifact-schema-spec-mvp-003`](../whetstone_runs/02-project-artifact-schema-spec-mvp-003) |
 | Parser Interface and Format | [`03-parser-interface-format-spec-hld-mvp-001`](../whetstone_runs/03-parser-interface-format-spec-hld-mvp-001)<br>[`03-parser-interface-format-spec-mvp-003`](../whetstone_runs/03-parser-interface-format-spec-mvp-003) |
 | Placeholder and Token Integrity | [`04-placeholder-token-integrity-spec-hld-mvp-001`](../whetstone_runs/04-placeholder-token-integrity-spec-hld-mvp-001)<br>[`04-placeholder-token-integrity-spec-mvp-003`](../whetstone_runs/04-placeholder-token-integrity-spec-mvp-003) |
 | Confidence Model | [`05-confidence-model-spec-hld-mvp-001`](../whetstone_runs/05-confidence-model-spec-hld-mvp-001)<br>[`05-confidence-model-spec-mvp-003`](../whetstone_runs/05-confidence-model-spec-mvp-003) |
@@ -91,14 +92,14 @@ No tracked spec docs were found without a Whetstone run. Current docs scanned:
 
 ## Candidate Priority Queue
 
-1. Commit the applied-back docs batch: CLI Command, Confidence Model, Validation and Error Taxonomy, and this refreshed tracking matrix.
+1. Use the HLD + Project Artifact Schema + CLI spec as the foundation for the first implementation slice, starting with project root detection and `parley project init` artifact creation.
 2. Resume or synthesize the halted Translation Workflow HLD-context run if Whetstone reports it as resumable.
-3. Continue or bounded-synthesize the non-converged HLD-context runs: Translation Memory, Project Artifact Schema, Parser Interface and Format, and Placeholder and Token Integrity.
+3. Continue or bounded-synthesize the remaining non-converged HLD-context runs: Translation Memory, Parser Interface and Format, and Placeholder and Token Integrity.
 4. Treat the Spec Index as navigation/dependency context unless an explicit index cleanup pass is desired.
 
 ## Maintenance Notes
 
 - Update this matrix after each Whetstone run, focused recheck, Phase 2 convergence, strop, or apply-back.
 - When a spec has multiple Whetstone attempts, add the run root to [Run Lineage Counted](#run-lineage-counted) and refresh lineage totals.
-- Prefer linking `Current Whetstone draft` to the run-level `spec.md` when it contains the latest accepted Whetstone draft.
+- Prefer linking `Current working draft` to the source doc when a manual synthesis has intentionally moved source ahead of Whetstone; otherwise link to the run-level `spec.md` when it contains the latest accepted Whetstone draft.
 - If source docs receive post-apply manual updates, mark `SOURCE_AHEAD_OF_RUN` rather than pretending the source still hash-matches the Whetstone run draft.
