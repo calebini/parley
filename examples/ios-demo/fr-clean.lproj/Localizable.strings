@@ -1,0 +1,9 @@
+"app.title" = "Taches de poche";
+"home.greeting" = "Bonjour, %@";
+"task.count" = "%d taches a faire aujourd'hui";
+"task.due_date" = "Echeance le %@";
+"sync.status" = "Derniere synchronisation %@";
+"upgrade.cta" = "Passer a Pro";
+"error.network" = "Impossible de joindre le serveur. Reessayez.";
+"settings.notifications" = "Notifications";
+

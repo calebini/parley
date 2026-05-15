@@ -8,6 +8,7 @@ import sys
 from parley.errors import EXIT_USAGE_OR_SCHEMA
 from parley.localization import localization_add
 from parley.project_init import project_init
+from parley.translation import translate_project
 from parley.validation import project_inspect, validate_project
 
 
@@ -54,6 +55,15 @@ def build_parser() -> argparse.ArgumentParser:
     authoritative = validate.add_mutually_exclusive_group()
     authoritative.add_argument("--authoritative", dest="authoritative", action="store_true")
     authoritative.add_argument("--no-authoritative", dest="authoritative", action="store_false")
+
+    translate = subparsers.add_parser("translate")
+    translate.add_argument("--project-root")
+    translate.add_argument("--target-locale", required=True)
+    translate.add_argument("--target-path")
+    translate.add_argument("--reuse-mode", choices=["tm_only", "tm_then_provider", "provider_only"], default="tm_then_provider")
+    translate.add_argument("--dry-run", action="store_true")
+    translate.add_argument("--no-provider", action="store_true")
+    translate.add_argument("--report-dir")
 
     return parser
 
@@ -131,6 +141,26 @@ def main(argv: list[str] | None = None) -> int:
         if result.message:
             print(result.message, file=sys.stderr)
         return result.exit_code
+    if args.command_group == "translate":
+        result = translate_project(
+            project_root=args.project_root,
+            target_locale=args.target_locale,
+            target_path=args.target_path,
+            reuse_mode=args.reuse_mode,
+            dry_run=args.dry_run,
+            no_provider=args.no_provider,
+            report_dir=args.report_dir,
+            cwd=Path.cwd(),
+        )
+        _emit_payload_or_summary(
+            command="translate",
+            result=result,
+            output_format=args.output_format,
+            quiet=args.quiet,
+        )
+        if result.message:
+            print(result.message, file=sys.stderr)
+        return result.exit_code
 
     parser.print_help(sys.stderr)
     return EXIT_USAGE_OR_SCHEMA
@@ -153,7 +183,7 @@ def _emit_summary(
                     "command": command,
                     "exit_code": exit_code,
                     "reports": [
-                        {"kind": "validation", "path": str(path)}
+                        {"kind": path.parent.name, "path": str(path)}
                         for path in sorted(reports, key=lambda item: str(item))
                     ],
                 },

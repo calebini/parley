@@ -314,6 +314,31 @@ def _empty_translation_memory_bytes() -> bytes:
                 "CREATE TABLE IF NOT EXISTS metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL)"
             )
             conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS memory_entries (
+                    tm_record_id TEXT PRIMARY KEY,
+                    project_id TEXT NOT NULL,
+                    key TEXT NOT NULL,
+                    source_locale TEXT NOT NULL,
+                    target_locale TEXT NOT NULL,
+                    source_content_hash TEXT NOT NULL,
+                    last_translated_source_hash TEXT NOT NULL,
+                    target_value TEXT NOT NULL,
+                    placeholder_signature TEXT NOT NULL,
+                    provenance TEXT NOT NULL,
+                    human_status TEXT NOT NULL,
+                    is_current INTEGER NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_memory_conflict_identity
+                ON memory_entries (project_id, key, source_locale, target_locale)
+                """
+            )
+            conn.execute(
                 "INSERT OR REPLACE INTO metadata (key, value) VALUES ('schema_version', '1.0')"
             )
         return path.read_bytes()

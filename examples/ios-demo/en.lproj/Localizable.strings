@@ -1,0 +1,9 @@
+"app.title" = "Pocket Tasks";
+"home.greeting" = "Hello, %@";
+"task.count" = "%d tasks due today";
+"task.due_date" = "Due on %@";
+"sync.status" = "Last synced %@";
+"upgrade.cta" = "Upgrade to Pro";
+"error.network" = "We couldn't reach the server. Try again.";
+"settings.notifications" = "Notifications";
+

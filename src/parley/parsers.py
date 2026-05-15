@@ -55,6 +55,14 @@ def parse_localization(content: str, fmt: str) -> ParsedLocalization:
     return ParsedLocalization(entries=sorted(entries, key=lambda item: item.key), normalized_hash=sha256_canonical_json(normalized))
 
 
+def serialize_localization(entries: list[ParsedEntry], fmt: str) -> str:
+    if fmt == "ios_strings":
+        return _serialize_ios_strings(entries)
+    if fmt == "android_xml":
+        return _serialize_android_xml(entries)
+    raise ParserError(f"unsupported localization format: {fmt}")
+
+
 def _parse_ios_strings(content: str) -> list[ParsedEntry]:
     entries: list[ParsedEntry] = []
     in_block_comment = False
@@ -81,6 +89,14 @@ def _parse_ios_strings(content: str) -> list[ParsedEntry]:
     return _ensure_unique(entries)
 
 
+def _serialize_ios_strings(entries: list[ParsedEntry]) -> str:
+    lines = [
+        f'"{_encode_ios_string(entry.key)}" = "{_encode_ios_string(entry.value)}";'
+        for entry in sorted(entries, key=lambda item: item.key)
+    ]
+    return "\n".join(lines) + ("\n" if lines else "")
+
+
 def _parse_android_xml(content: str) -> list[ParsedEntry]:
     try:
         root = ET.fromstring(content)
@@ -100,11 +116,36 @@ def _parse_android_xml(content: str) -> list[ParsedEntry]:
     return _ensure_unique(entries)
 
 
+def _serialize_android_xml(entries: list[ParsedEntry]) -> str:
+    lines = ["<resources>"]
+    for entry in sorted(entries, key=lambda item: item.key):
+        lines.append(f'    <string name="{_encode_xml_attr(entry.key)}">{_encode_xml_text(entry.value)}</string>')
+    lines.append("</resources>")
+    return "\n".join(lines) + "\n"
+
+
 def _decode_quoted(value: str, line_number: int) -> str:
     try:
         return bytes(value, "utf-8").decode("unicode_escape")
     except UnicodeDecodeError as exc:
         raise ParserError(f"invalid string escape at line {line_number}") from exc
+
+
+def _encode_ios_string(value: str) -> str:
+    return value.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
+
+
+def _encode_xml_attr(value: str) -> str:
+    return (
+        value.replace("&", "&amp;")
+        .replace('"', "&quot;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+    )
+
+
+def _encode_xml_text(value: str) -> str:
+    return value.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
 def _extract_placeholders(value: str) -> list[dict[str, str]]:
@@ -126,4 +167,3 @@ def _ensure_unique(entries: list[ParsedEntry]) -> list[ParsedEntry]:
             raise ParserError(f"duplicate localization key: {entry.key}")
         seen.add(entry.key)
     return entries
-
