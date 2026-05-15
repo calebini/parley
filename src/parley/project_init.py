@@ -7,8 +7,8 @@ import shutil
 import sqlite3
 import tempfile
 
-from parley.errors import EXIT_IO_OR_PARSER, EXIT_OK, EXIT_USAGE_OR_SCHEMA, FileIOError, ParleyError, UsageError
-from parley.hashing import sha256_canonical_json, sha256_file_bytes, sha256_text
+from parley.errors import EXIT_OK, FileIOError, ParleyError, UsageError
+from parley.hashing import sha256_canonical_json, sha256_text
 from parley.parsers import infer_format, parse_localization
 from parley.paths import canonical_relative_path, resolve_report_dir
 from parley.reports import PreparedReport, ensure_report_can_be_written, prepare_report, utc_now
@@ -344,4 +344,3 @@ def _id_from_name(name: str) -> str:
     if not result[0].isalnum():
         result = "project-" + result
     return result
-

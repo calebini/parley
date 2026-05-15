@@ -50,6 +50,7 @@ def prepare_report(
     summary: dict,
     findings: list[dict] | None = None,
     failure_category: str | None = None,
+    extra_fields: dict | None = None,
 ) -> PreparedReport:
     run_id = run_id_for(started_at)
     filename = f"{canonical_command}--{run_id}.json"
@@ -71,6 +72,8 @@ def prepare_report(
         "findings": sorted(findings or [], key=_finding_sort_key),
         "failure_category": failure_category,
     }
+    if extra_fields:
+        payload.update(extra_fields)
     return PreparedReport(family=family, path=report_path, content=pretty_json(payload))
 
 

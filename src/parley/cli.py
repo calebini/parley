@@ -6,7 +6,9 @@ from pathlib import Path
 import sys
 
 from parley.errors import EXIT_USAGE_OR_SCHEMA
+from parley.localization import localization_add
 from parley.project_init import project_init
+from parley.validation import project_inspect, validate_project
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -25,6 +27,33 @@ def build_parser() -> argparse.ArgumentParser:
     init.add_argument("--format", choices=["ios_strings", "android_xml"])
     init.add_argument("--force", action="store_true")
     init.add_argument("--report-dir")
+
+    inspect = project_sub.add_parser("inspect")
+    inspect.add_argument("--project-root")
+
+    localization = subparsers.add_parser("localization")
+    localization_sub = localization.add_subparsers(dest="localization_command")
+    add = localization_sub.add_parser("add")
+    add.add_argument("path")
+    add.add_argument("--project-root")
+    add.add_argument("--locale", required=True)
+    add.add_argument("--format", choices=["ios_strings", "android_xml"])
+    add.add_argument("--role", choices=["target", "authoritative"], default="target")
+    add.add_argument("--id")
+    add.add_argument("--status", choices=["draft", "reviewed", "approved", "locked"], default="draft")
+    add.add_argument("--report-dir")
+
+    validate = subparsers.add_parser("validate")
+    validate.add_argument("--project-root")
+    validate.add_argument("--report-dir")
+    validate.add_argument("--only")
+    validate.set_defaults(targets=True, authoritative=True)
+    targets = validate.add_mutually_exclusive_group()
+    targets.add_argument("--targets", dest="targets", action="store_true")
+    targets.add_argument("--no-targets", dest="targets", action="store_false")
+    authoritative = validate.add_mutually_exclusive_group()
+    authoritative.add_argument("--authoritative", dest="authoritative", action="store_true")
+    authoritative.add_argument("--no-authoritative", dest="authoritative", action="store_false")
 
     return parser
 
@@ -48,6 +77,54 @@ def main(argv: list[str] | None = None) -> int:
             command="project_init",
             exit_code=result.exit_code,
             reports=result.reports,
+            output_format=args.output_format,
+            quiet=args.quiet,
+        )
+        if result.message:
+            print(result.message, file=sys.stderr)
+        return result.exit_code
+    if args.command_group == "project" and args.project_command == "inspect":
+        result = project_inspect(project_root=args.project_root, cwd=Path.cwd())
+        _emit_payload_or_summary(
+            command="project_inspect",
+            result=result,
+            output_format=args.output_format,
+            quiet=args.quiet,
+        )
+        return result.exit_code
+    if args.command_group == "localization" and args.localization_command == "add":
+        result = localization_add(
+            project_root=args.project_root,
+            path=args.path,
+            locale=args.locale,
+            fmt=args.format,
+            role=args.role,
+            localization_id=args.id,
+            status=args.status,
+            report_dir=args.report_dir,
+            cwd=Path.cwd(),
+        )
+        _emit_payload_or_summary(
+            command="localization_add",
+            result=result,
+            output_format=args.output_format,
+            quiet=args.quiet,
+        )
+        if result.message:
+            print(result.message, file=sys.stderr)
+        return result.exit_code
+    if args.command_group == "validate":
+        result = validate_project(
+            project_root=args.project_root,
+            only_locale=args.only,
+            include_targets=args.targets,
+            include_authoritative=args.authoritative,
+            report_dir=args.report_dir,
+            cwd=Path.cwd(),
+        )
+        _emit_payload_or_summary(
+            command="validate",
+            result=result,
             output_format=args.output_format,
             quiet=args.quiet,
         )
@@ -90,3 +167,17 @@ def _emit_summary(
     for path in sorted(reports, key=lambda item: str(item)):
         print(f"report={path}")
 
+
+def _emit_payload_or_summary(*, command: str, result, output_format: str, quiet: bool) -> None:
+    if quiet:
+        return
+    if result.payload is not None and output_format == "json":
+        print(json.dumps(result.payload, sort_keys=True))
+        return
+    _emit_summary(
+        command=command,
+        exit_code=result.exit_code,
+        reports=result.reports,
+        output_format=output_format,
+        quiet=quiet,
+    )

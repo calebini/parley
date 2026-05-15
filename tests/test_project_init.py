@@ -6,7 +6,7 @@ import sqlite3
 import sys
 import tempfile
 import unittest
-from contextlib import redirect_stderr, redirect_stdout
+from contextlib import redirect_stdout
 from io import StringIO
 from unittest import mock
 
@@ -14,6 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from parley.cli import main
+from helpers import run_cli, stable_run_env
 
 
 class ProjectInitTests(unittest.TestCase):
@@ -28,8 +29,8 @@ class ProjectInitTests(unittest.TestCase):
             source = root / "en.lproj" / "Localizable.strings"
             source.parent.mkdir()
             source.write_text('"hello" = "Hello %@";\n"bye" = "Bye";\n', encoding="utf-8")
-            with _stable_run_env():
-                exit_code = _run_cli(
+            with stable_run_env():
+                exit_code = run_cli(
                     [
                         "project",
                         "init",
@@ -70,8 +71,8 @@ class ProjectInitTests(unittest.TestCase):
             (root / "parley.yaml").write_text("sentinel", encoding="utf-8")
             source = root / "Localizable.strings"
             source.write_text('"hello" = "Hello";\n', encoding="utf-8")
-            with _stable_run_env():
-                exit_code = _run_cli(
+            with stable_run_env():
+                exit_code = run_cli(
                     [
                         "project",
                         "init",
@@ -99,8 +100,8 @@ class ProjectInitTests(unittest.TestCase):
             (root / ".parley").mkdir()
             (root / ".parley" / "keep.txt").write_text("keep", encoding="utf-8")
             (root / "parley.yaml").write_text("old manifest", encoding="utf-8")
-            with _stable_run_env("2026-05-15T01:02:03.000004Z", "b" * 32):
-                exit_code = _run_cli(
+            with stable_run_env("2026-05-15T01:02:03.000004Z", "b" * 32):
+                exit_code = run_cli(
                     [
                         "project",
                         "init",
@@ -128,8 +129,8 @@ class ProjectInitTests(unittest.TestCase):
             root = Path(project_tmp)
             outside = Path(outside_tmp) / "Localizable.strings"
             outside.write_text('"hello" = "Hello";\n', encoding="utf-8")
-            with _stable_run_env():
-                exit_code = _run_cli(
+            with stable_run_env():
+                exit_code = run_cli(
                     [
                         "project",
                         "init",
@@ -151,8 +152,8 @@ class ProjectInitTests(unittest.TestCase):
             root = Path(tmp)
             source = root / "Localizable.strings"
             source.write_text('"hello" = "Hello"\n', encoding="utf-8")
-            with _stable_run_env():
-                exit_code = _run_cli(
+            with stable_run_env():
+                exit_code = run_cli(
                     [
                         "project",
                         "init",
@@ -185,8 +186,8 @@ class ProjectInitTests(unittest.TestCase):
                     return True
                 return original_exists(path)
 
-            with _stable_run_env(), mock.patch.object(Path, "exists", race_exists):
-                exit_code = _run_cli(
+            with stable_run_env(), mock.patch.object(Path, "exists", race_exists):
+                exit_code = run_cli(
                     [
                         "project",
                         "init",
@@ -204,18 +205,6 @@ class ProjectInitTests(unittest.TestCase):
             self.assertEqual(report.read_text(encoding="utf-8"), "existing")
             self.assertFalse((root / "parley.yaml").exists())
             self.assertFalse((root / "inventory.yaml").exists())
-
-
-def _stable_run_env(started_at: str = "2026-05-15T00:00:00.000001Z", nonce: str = "a" * 32):
-    return mock.patch.dict(
-        "os.environ",
-        {"PARLEY_STARTED_AT": started_at, "PARLEY_PROCESS_NONCE_HEX": nonce},
-    )
-
-
-def _run_cli(argv: list[str]) -> int:
-    with redirect_stdout(StringIO()), redirect_stderr(StringIO()):
-        return main(argv)
 
 
 def _expected_report_name() -> str:

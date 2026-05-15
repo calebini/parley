@@ -117,6 +117,8 @@ Implemented notes:
 
 Goal: make Parley able to load and validate its own project artifacts consistently.
 
+Status: initial MVP implementation complete.
+
 Scope:
 
 - Implement artifact readers for `parley.yaml`, `inventory.yaml`, `canonical-inventory.json`, `context-anchor.yaml`, optional `glossary.yaml`, and `translation-memory.sqlite`.
@@ -131,9 +133,18 @@ Exit criteria:
 - Missing or schema-invalid required artifacts produce deterministic exit behavior and reports.
 - Optional missing `glossary.yaml` behaves as an empty ruleset.
 
+Implemented notes:
+
+- Added artifact readers/inspectors for the current Parley-owned YAML/JSON/SQLite artifacts.
+- Added `parley project inspect` for deterministic artifact health output.
+- Added `parley validate` with selected-entry ordering, report/no-report behavior for pre-selection failures, and validation reports after entry selection.
+- Validation depth is intentionally minimum-schema plus local structural/placeholder findings.
+
 ### Slice 3: Parser Interface
 
 Goal: establish the parser adapter boundary and one concrete parser.
+
+Status: initial reusable parser boundary complete.
 
 Scope:
 
@@ -149,9 +160,17 @@ Exit criteria:
 - Parser output is deterministic.
 - Parser failures map to exit code `3` and `parser` or `io` failure categories as appropriate.
 
+Implemented notes:
+
+- The parser module now serves both project initialization and validation/localization workflows.
+- Current concrete formats are iOS `.strings` and Android XML.
+- Placeholder extraction is deliberately lean and should be expanded when the Placeholder Token Integrity spec is synthesized further.
+
 ### Slice 4: Inventory and Canonical Baseline
 
 Goal: make inventory and canonical inventory updates reliable.
+
+Status: initial MVP implementation complete.
 
 Scope:
 
@@ -167,9 +186,17 @@ Exit criteria:
 - Canonical inventory generation is deterministic.
 - Placeholder signatures are stored for later validation.
 
+Implemented notes:
+
+- Added `parley localization add` for target and constrained authoritative updates.
+- Target additions update `inventory.yaml`; authoritative additions/updates refresh `parley.yaml` and `canonical-inventory.json`.
+- Multi-file updates use a shared staged commit/rollback helper for normal command-return failures.
+
 ### Slice 5: Placeholder Integrity
 
 Goal: validate placeholder compatibility between canonical and target localizations.
+
+Status: initial MVP implementation complete.
 
 Scope:
 
@@ -181,6 +208,12 @@ Exit criteria:
 
 - `parley validate` detects placeholder mismatches for parsed target files.
 - Findings are stable in ID and order.
+
+Implemented notes:
+
+- Validation compares selected parsed entries against `canonical-inventory.json`.
+- Findings currently cover missing keys, extra keys, and placeholder-signature mismatches.
+- Detailed token semantics and richer finding taxonomy remain intentionally deferred to later Placeholder/Validation spec tightening.
 
 ### Slice 6: Context and Confidence
 
