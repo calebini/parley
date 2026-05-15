@@ -31,6 +31,8 @@ Implementation stance:
 
 Goal: establish the package and test shape without committing to every workflow.
 
+Status: implemented as the initial Python package skeleton in `src/parley`, with a stdlib CLI/test setup.
+
 Scope:
 
 - Choose the Python package layout and CLI entrypoint.
@@ -47,9 +49,17 @@ Exit criteria:
 - Serialization helpers are covered by focused tests.
 - No provider, translation, or parser implementation is required yet beyond minimal stubs.
 
+Implemented notes:
+
+- CLI entrypoint is `parley.cli:main` with `python -m parley` support.
+- Serialization is currently stdlib-only: deterministic JSON plus a narrow YAML writer for Parley-owned MVP artifacts.
+- Parser support is intentionally minimal and exists only to support `project init` canonical inventory generation; Slice 3 should revisit this boundary.
+
 ### Slice 1: Project Init
 
 Goal: implement the first useful project workflow: `parley project init`.
+
+Status: implemented at MVP depth with deterministic artifact creation, report writing, `--force`, and focused tests.
 
 Scope:
 
@@ -95,6 +105,13 @@ Out of scope:
 - Full validation matrix.
 - Translation memory import/export.
 - Translation workflow.
+
+Implemented notes:
+
+- `project init` supports iOS `.strings` and Android XML enough to derive the first canonical inventory.
+- `translation-memory.sqlite` is initialized as an empty SQLite database with minimal metadata only; richer table semantics remain Slice 7.
+- Initialization reports are written under `reports/validation/` following the CLI spec's current command mapping.
+- Rollback coverage is implemented for normal command-return failures during the managed artifact commit path; crash/power-loss recovery remains out of scope per the CLI spec.
 
 ### Slice 2: Artifact Loading and Validation
 
