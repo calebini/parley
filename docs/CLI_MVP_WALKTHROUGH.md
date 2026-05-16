@@ -71,3 +71,39 @@ PYTHONPATH=src python3 -m parley translate \
 ```
 
 The second translate should reuse all generated entries from `translation-memory.sqlite` without provider work.
+
+## Translation Report Checks
+
+Translation reports are written under:
+
+```text
+$WORKDIR/reports/translation/
+```
+
+For the dummy-provider run, the report summary should show:
+
+```json
+{
+  "generated_count": 8,
+  "reused_count": 0,
+  "written_target": true,
+  "tm_written": true,
+  "dry_run": false,
+  "provider_id": "dummy",
+  "provider_status": "used"
+}
+```
+
+For the follow-up `tm_only` run, the report summary should show:
+
+```json
+{
+  "generated_count": 0,
+  "reused_count": 8,
+  "written_target": true,
+  "tm_written": true,
+  "dry_run": false,
+  "provider_id": "dummy",
+  "provider_status": "not_applicable"
+}
+```

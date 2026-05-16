@@ -49,6 +49,7 @@ class TranslateTests(unittest.TestCase):
             self.assertEqual(payload["provider_status"], "not_applicable")
             self.assertEqual([item["outcome"] for item in payload["per_key_outcomes"]], ["reused", "reused"])
             self.assertEqual(payload["summary"]["reused_count"], 2)
+            self.assertEqual(_summary_flags(payload), (True, True, False, "dummy", "not_applicable"))
 
     def test_translate_tm_only_reports_tm_miss_without_target_writeback(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -80,6 +81,7 @@ class TranslateTests(unittest.TestCase):
             self.assertEqual(outcomes["bye"]["outcome"], "failed")
             self.assertEqual(outcomes["bye"]["category"], "tm_miss")
             self.assertEqual(outcomes["hello"]["outcome"], "reused")
+            self.assertEqual(_summary_flags(payload), (False, False, False, "dummy", "not_applicable"))
 
     def test_translate_provider_required_no_provider_writes_deterministic_report(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -108,6 +110,7 @@ class TranslateTests(unittest.TestCase):
             self.assertEqual(payload["failure_category"], "provider_disallowed")
             self.assertEqual(payload["provider_status"], "skipped")
             self.assertEqual(payload["provider_skip_reason"], "no_provider")
+            self.assertEqual(_summary_flags(payload), (False, False, False, "dummy", "skipped"))
             self.assertEqual(
                 [item["category"] for item in payload["per_key_outcomes"]],
                 ["provider_disallowed", "provider_disallowed"],
@@ -145,6 +148,7 @@ class TranslateTests(unittest.TestCase):
             self.assertEqual(payload["provider_status"], "used")
             self.assertEqual([item["outcome"] for item in payload["per_key_outcomes"]], ["generated", "generated"])
             self.assertEqual(payload["summary"]["generated_count"], 2)
+            self.assertEqual(_summary_flags(payload), (True, True, False, "dummy", "used"))
 
     def test_translate_tm_then_provider_reuses_and_generates(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -179,6 +183,7 @@ class TranslateTests(unittest.TestCase):
             self.assertEqual([item["outcome"] for item in payload["per_key_outcomes"]], ["generated", "reused"])
             self.assertEqual(payload["summary"]["generated_count"], 1)
             self.assertEqual(payload["summary"]["reused_count"], 1)
+            self.assertEqual(_summary_flags(payload), (True, True, False, "dummy", "used"))
 
     def test_translate_provider_dry_run_writes_report_without_target_writeback(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -207,6 +212,7 @@ class TranslateTests(unittest.TestCase):
             payload = json.loads(report.read_text(encoding="utf-8"))
             self.assertEqual(payload["provider_status"], "used")
             self.assertEqual([item["outcome"] for item in payload["per_key_outcomes"]], ["generated", "generated"])
+            self.assertEqual(_summary_flags(payload), (False, False, True, "dummy", "used"))
             self.assertEqual(_tm_rows(root), [])
 
     def test_translate_generated_writeback_populates_tm_for_later_reuse(self) -> None:
@@ -262,6 +268,7 @@ class TranslateTests(unittest.TestCase):
             report = root / "reports" / "translation" / "translate--20260515T180000000000Z-dddddddddddddddddddddddddddddddd.json"
             payload = json.loads(report.read_text(encoding="utf-8"))
             self.assertEqual([item["outcome"] for item in payload["per_key_outcomes"]], ["reused", "reused"])
+            self.assertEqual(_summary_flags(payload), (True, True, False, "dummy", "not_applicable"))
             self.assertEqual({row["updated_at"] for row in _tm_rows(root)}, {"2026-05-15T17:00:00.000000Z"})
 
     def test_translate_reused_writeback_marks_selected_record_current(self) -> None:
@@ -388,6 +395,17 @@ def _tm_rows(root: Path) -> list[dict]:
                 """
             )
         ]
+
+
+def _summary_flags(payload: dict) -> tuple[bool, bool, bool, str, str]:
+    summary = payload["summary"]
+    return (
+        summary["written_target"],
+        summary["tm_written"],
+        summary["dry_run"],
+        summary["provider_id"],
+        summary["provider_status"],
+    )
 
 
 if __name__ == "__main__":

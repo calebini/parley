@@ -653,6 +653,9 @@ def _write_translation_report(
     validation_findings: list[dict] | None = None,
     message: str | None = None,
 ) -> CommandResult:
+    files = files or {}
+    written_target = any(path == root / target["path"] for path in files)
+    tm_written = any(path.name == "translation-memory.sqlite" for path in files)
     extra_fields = {
         "target_locale": target_locale,
         "target_path": target["path"],
@@ -688,12 +691,18 @@ def _write_translation_report(
             "reused_count": sum(1 for item in per_key_outcomes if item["outcome"] == "reused"),
             "skipped_count": sum(1 for item in per_key_outcomes if item["outcome"] == "skipped"),
             "generated_count": sum(1 for item in per_key_outcomes if item["outcome"] == "generated"),
+            "written_target": written_target,
+            "tm_written": tm_written,
+            "dry_run": dry_run,
+            "provider_id": provider,
+            "provider_status": provider_status,
+            "target_path": target["path"],
         },
         failure_category=failure_category,
         extra_fields=extra_fields,
     )
     try:
-        commit_files(root, files or {}, {report.path: report.content})
+        commit_files(root, files, {report.path: report.content})
     except ParleyError as exc:
         return CommandResult(exc.exit_code, [], str(exc))
     return CommandResult(exit_code, [report.path], message)
