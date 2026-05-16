@@ -241,6 +241,7 @@ Scope:
 - Implement lookup by project/source/target/key/content identity.
 - Implement current-record selection and conflict behavior.
 - Implement deterministic `updated_at` handling for CLI-written records.
+- Keep `confidence_json` and `metadata_json` as MVP-safe expansion fields; richer human/model review evidence remains a future table keyed by TM record ID.
 
 Exit criteria:
 

@@ -50,7 +50,7 @@ SQLite MUST be treated as machine-managed. Human review should happen through CL
 | `glossary_version` | text | nullable |
 | `provenance` | text | not null |
 | `approval_status` | text | not null |
-| `confidence_json` | text | not null |
+| `confidence_json` | text | not null default `{}` |
 | `metadata_json` | text | not null default `{}` |
 | `created_at` | text | not null |
 | `updated_at` | text | not null |
@@ -87,6 +87,12 @@ Allowed `approval_status` values:
 - `locked`
 
 `approval_status` uses the same semantic meaning as human status in project artifacts.
+
+## 5.1 Review and Confidence Expansion Point
+
+For the MVP, `provenance` and `approval_status` are the decision fields used by translation reuse ordering. `confidence_json` and `metadata_json` are reserved expansion fields and MAY remain `{}` for records written by MVP commands.
+
+Richer review evidence is out of MVP scope. A future implementation MAY add a separate review table keyed by `memory_id`/`tm_record_id` to track human reviewers, model reviewers, model identifiers, confidence dimensions, rationale, review status, and review timestamps. MVP commands are not required to create or consume those review records.
 
 ## 6. Lookup Strategy
 
