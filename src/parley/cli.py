@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 import sys
 
+from parley.context import context_seed
 from parley.errors import EXIT_USAGE_OR_SCHEMA
 from parley.localization import localization_add
 from parley.project_init import project_init
@@ -65,6 +66,12 @@ def build_parser() -> argparse.ArgumentParser:
     translate.add_argument("--dry-run", action="store_true")
     translate.add_argument("--no-provider", action="store_true")
     translate.add_argument("--report-dir")
+
+    context = subparsers.add_parser("context")
+    context_sub = context.add_subparsers(dest="context_command")
+    seed = context_sub.add_parser("seed")
+    seed.add_argument("--project-root")
+    seed.add_argument("--mode", choices=["placeholder"], default="placeholder")
 
     return parser
 
@@ -156,6 +163,17 @@ def main(argv: list[str] | None = None) -> int:
         )
         _emit_payload_or_summary(
             command="translate",
+            result=result,
+            output_format=args.output_format,
+            quiet=args.quiet,
+        )
+        if result.message:
+            print(result.message, file=sys.stderr)
+        return result.exit_code
+    if args.command_group == "context" and args.context_command == "seed":
+        result = context_seed(project_root=args.project_root, mode=args.mode, cwd=Path.cwd())
+        _emit_payload_or_summary(
+            command="context_seed",
             result=result,
             output_format=args.output_format,
             quiet=args.quiet,

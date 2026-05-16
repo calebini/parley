@@ -12,7 +12,7 @@ Suggested dry-run flow:
 
 1. Copy this directory to a temporary project root.
 2. Run `parley project init` with `en.lproj/Localizable.strings` as the authoritative localization.
-3. Populate `context-anchor.yaml` with non-empty per-key context.
+3. Run `parley context seed --mode placeholder` to populate local dry-run context.
 4. Add an empty target localization.
 5. Run `parley translate --target-locale fr-FR --reuse-mode provider_only --provider dummy`.
 6. Run `parley validate --no-authoritative`.
