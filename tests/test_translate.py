@@ -207,6 +207,92 @@ class TranslateTests(unittest.TestCase):
             payload = json.loads(report.read_text(encoding="utf-8"))
             self.assertEqual(payload["provider_status"], "used")
             self.assertEqual([item["outcome"] for item in payload["per_key_outcomes"]], ["generated", "generated"])
+            self.assertEqual(_tm_rows(root), [])
+
+    def test_translate_generated_writeback_populates_tm_for_later_reuse(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            init_project(root)
+            _populate_context_anchor(root)
+            target = _add_empty_target(root)
+
+            with stable_run_env("2026-05-15T17:00:00.000000Z", "c" * 32):
+                first_code = run_cli(
+                    [
+                        "translate",
+                        "--project-root",
+                        str(root),
+                        "--target-locale",
+                        "fr-FR",
+                        "--reuse-mode",
+                        "provider_only",
+                    ]
+                )
+            self.assertEqual(first_code, 0)
+            rows_after_generate = _tm_rows(root)
+            self.assertEqual(
+                [(row["key"], row["target_value"], row["provenance"], row["human_status"], row["is_current"]) for row in rows_after_generate],
+                [
+                    ("bye", "[fr-fr] Bye", "machine_generated", "draft", 1),
+                    ("hello", "[fr-fr] Hello %@", "machine_generated", "draft", 1),
+                ],
+            )
+            self.assertEqual({row["updated_at"] for row in rows_after_generate}, {"2026-05-15T17:00:00.000000Z"})
+            self.assertEqual({row["confidence_json"] for row in rows_after_generate}, {"{}"})
+            self.assertEqual({row["metadata_json"] for row in rows_after_generate}, {"{}"})
+
+            target.write_text("", encoding="utf-8")
+            with stable_run_env("2026-05-15T18:00:00.000000Z", "d" * 32):
+                second_code = run_cli(
+                    [
+                        "translate",
+                        "--project-root",
+                        str(root),
+                        "--target-locale",
+                        "fr-FR",
+                        "--reuse-mode",
+                        "tm_only",
+                    ]
+                )
+            self.assertEqual(second_code, 0)
+            self.assertEqual(
+                target.read_text(encoding="utf-8"),
+                '"bye" = "[fr-fr] Bye";\n"hello" = "[fr-fr] Hello %@";\n',
+            )
+            report = root / "reports" / "translation" / "translate--20260515T180000000000Z-dddddddddddddddddddddddddddddddd.json"
+            payload = json.loads(report.read_text(encoding="utf-8"))
+            self.assertEqual([item["outcome"] for item in payload["per_key_outcomes"]], ["reused", "reused"])
+            self.assertEqual({row["updated_at"] for row in _tm_rows(root)}, {"2026-05-15T17:00:00.000000Z"})
+
+    def test_translate_reused_writeback_marks_selected_record_current(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            init_project(root)
+            _populate_context_anchor(root)
+            _add_empty_target(root)
+            canonical = json.loads((root / "canonical-inventory.json").read_text(encoding="utf-8"))
+            _insert_tm_record(root, canonical, "hello", "Bonjour ancien %@", record_id="tm-hello-old", is_current=1)
+            _insert_tm_record(root, canonical, "hello", "Bonjour %@", record_id="tm-hello-new", is_current=0, updated_at="2026-05-15T10:00:00.000000Z")
+            _insert_tm_record(root, canonical, "bye", "Au revoir")
+
+            with stable_run_env("2026-05-15T19:00:00.000000Z", "e" * 32):
+                code = run_cli(
+                    [
+                        "translate",
+                        "--project-root",
+                        str(root),
+                        "--target-locale",
+                        "fr-FR",
+                        "--reuse-mode",
+                        "tm_only",
+                    ]
+                )
+
+            self.assertEqual(code, 0)
+            rows = {row["tm_record_id"]: row for row in _tm_rows(root)}
+            self.assertEqual(rows["tm-hello-new"]["is_current"], 1)
+            self.assertEqual(rows["tm-hello-new"]["updated_at"], "2026-05-15T19:00:00.000000Z")
+            self.assertEqual(rows["tm-hello-old"]["is_current"], 0)
 
 
 def _populate_context_anchor(root: Path) -> None:
@@ -245,7 +331,16 @@ def _add_empty_target(root: Path) -> Path:
     return target
 
 
-def _insert_tm_record(root: Path, canonical: dict, key: str, target_value: str) -> None:
+def _insert_tm_record(
+    root: Path,
+    canonical: dict,
+    key: str,
+    target_value: str,
+    *,
+    record_id: str | None = None,
+    is_current: int = 1,
+    updated_at: str = "2026-05-15T09:00:00.000000Z",
+) -> None:
     entry = canonical["entries"][key]
     with sqlite3.connect(root / "translation-memory.sqlite") as conn:
         conn.execute(
@@ -253,12 +348,13 @@ def _insert_tm_record(root: Path, canonical: dict, key: str, target_value: str) 
             INSERT INTO memory_entries (
                 tm_record_id, project_id, key, source_locale, target_locale,
                 source_content_hash, last_translated_source_hash, target_value,
-                placeholder_signature, provenance, human_status, is_current, updated_at
+                placeholder_signature, provenance, human_status, is_current,
+                confidence_json, metadata_json, created_at, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
-                f"tm-{key}",
+                record_id or f"tm-{key}",
                 canonical["project_id"],
                 key,
                 canonical["authoritative_locale"],
@@ -269,10 +365,29 @@ def _insert_tm_record(root: Path, canonical: dict, key: str, target_value: str) 
                 entry["placeholder_signature"],
                 "human_reviewed",
                 "reviewed",
-                1,
-                "2026-05-15T09:00:00.000000Z",
+                is_current,
+                "{}",
+                "{}",
+                updated_at,
+                updated_at,
             ),
         )
+
+
+def _tm_rows(root: Path) -> list[dict]:
+    with sqlite3.connect(root / "translation-memory.sqlite") as conn:
+        conn.row_factory = sqlite3.Row
+        return [
+            dict(row)
+            for row in conn.execute(
+                """
+                SELECT tm_record_id, key, target_value, provenance, human_status, is_current,
+                       confidence_json, metadata_json, created_at, updated_at
+                FROM memory_entries
+                ORDER BY key, tm_record_id
+                """
+            )
+        ]
 
 
 if __name__ == "__main__":

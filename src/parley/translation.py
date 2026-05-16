@@ -6,7 +6,8 @@ import sqlite3
 
 from parley.artifacts import load_project_artifacts, resolve_project_root, schema_issues_for_required
 from parley.atomic import commit_files
-from parley.errors import EXIT_BLOCKING_FINDINGS, EXIT_IO_OR_PARSER, EXIT_OK, EXIT_PROVIDER, EXIT_USAGE_OR_SCHEMA, FileIOError, ParleyError, UsageError
+from parley.errors import EXIT_BLOCKING_FINDINGS, EXIT_IO_OR_PARSER, EXIT_OK, EXIT_PROVIDER, EXIT_USAGE_OR_SCHEMA, ParleyError, UsageError
+from parley.hashing import sha256_canonical_json
 from parley.parsers import ParsedEntry, parse_localization, serialize_localization
 from parley.paths import canonical_relative_path, resolve_report_dir
 from parley.providers import TranslationRequest, translation_provider
@@ -236,6 +237,7 @@ def translate_project(
                 outcomes = _generate_outcomes(
                     provider_client=provider_client,
                     outcomes=outcomes,
+                    project_id=artifacts.project_id,
                     canonical=canonical,
                     source_locale=artifacts.manifest["project"]["authoritative_locale"],
                     target_locale=normalized_target_locale,
@@ -270,6 +272,19 @@ def translate_project(
             failure_category = "blocking_validation_findings"
         elif not dry_run:
             files[target_file] = staged_content.encode("utf-8")
+            try:
+                tm_bytes = _translation_memory_after_writeback(
+                    tm_path=root / artifacts.manifest["artifacts"]["translation_memory"],
+                    project_id=artifacts.project_id,
+                    canonical=canonical,
+                    source_locale=artifacts.manifest["project"]["authoritative_locale"],
+                    target_locale=normalized_target_locale,
+                    outcomes=outcomes,
+                    updated_at=started_at,
+                )
+            except sqlite3.DatabaseError as exc:
+                return CommandResult(EXIT_USAGE_OR_SCHEMA, [], f"invalid translation-memory.sqlite: {exc}")
+            files[root / artifacts.manifest["artifacts"]["translation_memory"]] = tm_bytes
 
     return _write_translation_report(
         root=root,
@@ -404,6 +419,201 @@ def _record(row) -> TranslationRecord:
         is_current=bool(row[7]),
         updated_at=str(row[8]),
     )
+
+
+def _translation_memory_after_writeback(
+    *,
+    tm_path: Path,
+    project_id: str,
+    canonical: dict,
+    source_locale: str,
+    target_locale: str,
+    outcomes: list[dict],
+    updated_at: str,
+) -> bytes:
+    original = tm_path.read_bytes()
+    conn = sqlite3.connect(":memory:")
+    try:
+        conn.deserialize(original)
+        _ensure_memory_columns(conn)
+        for item in outcomes:
+            if item["outcome"] not in {"reused", "generated"}:
+                continue
+            canonical_entry = canonical["entries"][item["key"]]
+            if item["outcome"] == "reused":
+                _write_reused_record(
+                    conn=conn,
+                    project_id=project_id,
+                    key=item["key"],
+                    source_locale=source_locale,
+                    target_locale=target_locale,
+                    source_content_hash=canonical_entry["content_hash"],
+                    tm_record_id=item["tm_record_id"],
+                    updated_at=updated_at,
+                )
+            else:
+                _write_generated_record(
+                    conn=conn,
+                    tm_record_id=item["tm_record_id"],
+                    project_id=project_id,
+                    key=item["key"],
+                    source_locale=source_locale,
+                    target_locale=target_locale,
+                    source_content_hash=canonical_entry["content_hash"],
+                    target_value=item["target_value"],
+                    placeholder_signature=canonical_entry["placeholder_signature"],
+                    updated_at=updated_at,
+                )
+        conn.commit()
+        return conn.serialize()
+    finally:
+        conn.close()
+
+
+def _ensure_memory_columns(conn: sqlite3.Connection) -> None:
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(memory_entries)")}
+    additions = {
+        "confidence_json": "ALTER TABLE memory_entries ADD COLUMN confidence_json TEXT NOT NULL DEFAULT '{}'",
+        "metadata_json": "ALTER TABLE memory_entries ADD COLUMN metadata_json TEXT NOT NULL DEFAULT '{}'",
+        "created_at": "ALTER TABLE memory_entries ADD COLUMN created_at TEXT NOT NULL DEFAULT '1970-01-01T00:00:00.000000Z'",
+    }
+    for column, statement in additions.items():
+        if column not in columns:
+            conn.execute(statement)
+
+
+def _write_reused_record(
+    *,
+    conn: sqlite3.Connection,
+    project_id: str,
+    key: str,
+    source_locale: str,
+    target_locale: str,
+    source_content_hash: str,
+    tm_record_id: str,
+    updated_at: str,
+) -> None:
+    row = conn.execute(
+        """
+        SELECT last_translated_source_hash, is_current
+        FROM memory_entries
+        WHERE tm_record_id = ?
+        """,
+        (tm_record_id,),
+    ).fetchone()
+    if row is None:
+        raise sqlite3.DatabaseError(f"missing reused translation memory record: {tm_record_id}")
+    competing_current_count = conn.execute(
+        """
+        SELECT COUNT(*)
+        FROM memory_entries
+        WHERE project_id = ? AND key = ? AND source_locale = ? AND target_locale = ?
+          AND tm_record_id != ? AND is_current = 1
+        """,
+        (project_id, key, source_locale, target_locale, tm_record_id),
+    ).fetchone()[0]
+    changed = row[0] != source_content_hash or int(row[1]) != 1 or int(competing_current_count) > 0
+    conn.execute(
+        """
+        UPDATE memory_entries
+        SET is_current = 0
+        WHERE project_id = ? AND key = ? AND source_locale = ? AND target_locale = ?
+          AND tm_record_id != ?
+        """,
+        (project_id, key, source_locale, target_locale, tm_record_id),
+    )
+    conn.execute(
+        """
+        UPDATE memory_entries
+        SET source_content_hash = ?,
+            last_translated_source_hash = ?,
+            is_current = 1,
+            updated_at = CASE WHEN ? THEN ? ELSE updated_at END
+        WHERE tm_record_id = ?
+        """,
+        (source_content_hash, source_content_hash, 1 if changed else 0, updated_at, tm_record_id),
+    )
+
+
+def _write_generated_record(
+    *,
+    conn: sqlite3.Connection,
+    tm_record_id: str,
+    project_id: str,
+    key: str,
+    source_locale: str,
+    target_locale: str,
+    source_content_hash: str,
+    target_value: str,
+    placeholder_signature: str,
+    updated_at: str,
+) -> None:
+    conn.execute(
+        """
+        UPDATE memory_entries
+        SET is_current = 0
+        WHERE project_id = ? AND key = ? AND source_locale = ? AND target_locale = ?
+          AND tm_record_id != ?
+        """,
+        (project_id, key, source_locale, target_locale, tm_record_id),
+    )
+    conn.execute(
+        """
+        INSERT INTO memory_entries (
+            tm_record_id, project_id, key, source_locale, target_locale,
+            source_content_hash, last_translated_source_hash, target_value,
+            placeholder_signature, provenance, human_status, is_current,
+            confidence_json, metadata_json, created_at, updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'machine_generated', 'draft', 1, '{}', '{}', ?, ?)
+        ON CONFLICT(tm_record_id) DO UPDATE SET
+            source_content_hash = excluded.source_content_hash,
+            last_translated_source_hash = excluded.last_translated_source_hash,
+            target_value = excluded.target_value,
+            placeholder_signature = excluded.placeholder_signature,
+            provenance = 'machine_generated',
+            human_status = 'draft',
+            is_current = 1,
+            updated_at = excluded.updated_at
+        """,
+        (
+            tm_record_id,
+            project_id,
+            key,
+            source_locale,
+            target_locale,
+            source_content_hash,
+            source_content_hash,
+            target_value,
+            placeholder_signature,
+            updated_at,
+            updated_at,
+        ),
+    )
+
+
+def _generated_tm_record_id(
+    *,
+    project_id: str,
+    key: str,
+    source_locale: str,
+    target_locale: str,
+    source_content_hash: str,
+    target_value: str,
+    placeholder_signature: str,
+) -> str:
+    digest = sha256_canonical_json(
+        {
+            "project_id": project_id,
+            "key": key,
+            "source_locale": source_locale,
+            "target_locale": target_locale,
+            "source_content_hash": source_content_hash,
+            "target_value": target_value,
+            "placeholder_signature": placeholder_signature,
+        }
+    )
+    return f"tm-{digest[:32]}"
 
 
 def _reuse_sort_key(record: TranslationRecord) -> tuple:
@@ -571,6 +781,7 @@ def _generate_outcomes(
     *,
     provider_client,
     outcomes: list[dict],
+    project_id: str,
     canonical: dict,
     source_locale: str,
     target_locale: str,
@@ -590,11 +801,20 @@ def _generate_outcomes(
                 placeholder_signature=canonical_entry["placeholder_signature"],
             )
         )
+        tm_record_id = _generated_tm_record_id(
+            project_id=project_id,
+            key=item["key"],
+            source_locale=source_locale,
+            target_locale=target_locale,
+            source_content_hash=canonical_entry["content_hash"],
+            target_value=response.target_value,
+            placeholder_signature=canonical_entry["placeholder_signature"],
+        )
         generated.append(
             _outcome(
                 item["key"],
                 "generated",
-                tm_record_id=item.get("tm_record_id"),
+                tm_record_id=tm_record_id,
                 target_value=response.target_value,
             )
         )

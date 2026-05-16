@@ -328,6 +328,9 @@ def _empty_translation_memory_bytes() -> bytes:
                     provenance TEXT NOT NULL,
                     human_status TEXT NOT NULL,
                     is_current INTEGER NOT NULL,
+                    confidence_json TEXT NOT NULL DEFAULT '{}',
+                    metadata_json TEXT NOT NULL DEFAULT '{}',
+                    created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 )
                 """
