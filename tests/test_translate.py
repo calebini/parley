@@ -113,6 +113,101 @@ class TranslateTests(unittest.TestCase):
                 ["provider_disallowed", "provider_disallowed"],
             )
 
+    def test_translate_provider_only_dummy_generates_and_writes_target(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            init_project(root)
+            _populate_context_anchor(root)
+            target = _add_empty_target(root)
+
+            with stable_run_env("2026-05-15T14:00:00.000000Z", "9" * 32):
+                code = run_cli(
+                    [
+                        "translate",
+                        "--project-root",
+                        str(root),
+                        "--target-locale",
+                        "fr-FR",
+                        "--reuse-mode",
+                        "provider_only",
+                        "--provider",
+                        "dummy",
+                    ]
+                )
+
+            self.assertEqual(code, 0)
+            self.assertEqual(
+                target.read_text(encoding="utf-8"),
+                '"bye" = "[fr-fr] Bye";\n"hello" = "[fr-fr] Hello %@";\n',
+            )
+            report = root / "reports" / "translation" / "translate--20260515T140000000000Z-99999999999999999999999999999999.json"
+            payload = json.loads(report.read_text(encoding="utf-8"))
+            self.assertEqual(payload["provider_status"], "used")
+            self.assertEqual([item["outcome"] for item in payload["per_key_outcomes"]], ["generated", "generated"])
+            self.assertEqual(payload["summary"]["generated_count"], 2)
+
+    def test_translate_tm_then_provider_reuses_and_generates(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            init_project(root)
+            _populate_context_anchor(root)
+            target = _add_empty_target(root)
+            canonical = json.loads((root / "canonical-inventory.json").read_text(encoding="utf-8"))
+            _insert_tm_record(root, canonical, "hello", "Bonjour %@")
+
+            with stable_run_env("2026-05-15T15:00:00.000000Z", "a" * 32):
+                code = run_cli(
+                    [
+                        "translate",
+                        "--project-root",
+                        str(root),
+                        "--target-locale",
+                        "fr-FR",
+                        "--reuse-mode",
+                        "tm_then_provider",
+                    ]
+                )
+
+            self.assertEqual(code, 0)
+            self.assertEqual(
+                target.read_text(encoding="utf-8"),
+                '"bye" = "[fr-fr] Bye";\n"hello" = "Bonjour %@";\n',
+            )
+            report = root / "reports" / "translation" / "translate--20260515T150000000000Z-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.json"
+            payload = json.loads(report.read_text(encoding="utf-8"))
+            self.assertEqual(payload["provider_status"], "used")
+            self.assertEqual([item["outcome"] for item in payload["per_key_outcomes"]], ["generated", "reused"])
+            self.assertEqual(payload["summary"]["generated_count"], 1)
+            self.assertEqual(payload["summary"]["reused_count"], 1)
+
+    def test_translate_provider_dry_run_writes_report_without_target_writeback(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            init_project(root)
+            _populate_context_anchor(root)
+            target = _add_empty_target(root)
+
+            with stable_run_env("2026-05-15T16:00:00.000000Z", "b" * 32):
+                code = run_cli(
+                    [
+                        "translate",
+                        "--project-root",
+                        str(root),
+                        "--target-locale",
+                        "fr-FR",
+                        "--reuse-mode",
+                        "provider_only",
+                        "--dry-run",
+                    ]
+                )
+
+            self.assertEqual(code, 0)
+            self.assertEqual(target.read_text(encoding="utf-8"), "")
+            report = root / "reports" / "translation" / "translate--20260515T160000000000Z-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.json"
+            payload = json.loads(report.read_text(encoding="utf-8"))
+            self.assertEqual(payload["provider_status"], "used")
+            self.assertEqual([item["outcome"] for item in payload["per_key_outcomes"]], ["generated", "generated"])
+
 
 def _populate_context_anchor(root: Path) -> None:
     canonical = json.loads((root / "canonical-inventory.json").read_text(encoding="utf-8"))

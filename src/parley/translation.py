@@ -9,6 +9,7 @@ from parley.atomic import commit_files
 from parley.errors import EXIT_BLOCKING_FINDINGS, EXIT_IO_OR_PARSER, EXIT_OK, EXIT_PROVIDER, EXIT_USAGE_OR_SCHEMA, FileIOError, ParleyError, UsageError
 from parley.parsers import ParsedEntry, parse_localization, serialize_localization
 from parley.paths import canonical_relative_path, resolve_report_dir
+from parley.providers import TranslationRequest, translation_provider
 from parley.reports import prepare_report, utc_now
 from parley.validation import CommandResult
 
@@ -32,6 +33,7 @@ def translate_project(
     target_locale: str,
     target_path: str | None,
     reuse_mode: str,
+    provider: str,
     dry_run: bool,
     no_provider: bool,
     report_dir: str | None,
@@ -88,6 +90,7 @@ def translate_project(
             failure_category="source_io_error",
             dry_run=dry_run,
             no_provider=no_provider,
+            provider=provider,
             message=str(exc),
         )
     except ParleyError as exc:
@@ -105,6 +108,7 @@ def translate_project(
             failure_category="source_parse_error",
             dry_run=dry_run,
             no_provider=no_provider,
+            provider=provider,
             message=str(exc),
         )
 
@@ -130,6 +134,7 @@ def translate_project(
                 failure_category="target_io_error",
                 dry_run=dry_run,
                 no_provider=no_provider,
+                provider=provider,
                 message=str(exc),
             )
         except ParleyError as exc:
@@ -147,6 +152,7 @@ def translate_project(
                 failure_category="target_parse_error",
                 dry_run=dry_run,
                 no_provider=no_provider,
+                provider=provider,
                 message=str(exc),
             )
 
@@ -172,6 +178,7 @@ def translate_project(
             failure_category="source_missing",
             dry_run=dry_run,
             no_provider=no_provider,
+            provider=provider,
         )
 
     try:
@@ -204,6 +211,7 @@ def translate_project(
             failure_category="tm_current_conflict",
             dry_run=dry_run,
             no_provider=no_provider,
+            provider=provider,
         )
     except sqlite3.DatabaseError as exc:
         return CommandResult(EXIT_USAGE_OR_SCHEMA, [], f"invalid translation-memory.sqlite: {exc}")
@@ -223,12 +231,26 @@ def translate_project(
             provider_status = "skipped"
             provider_skip_reason = "no_provider"
         else:
-            outcomes = _mark_provider_unavailable(outcomes)
-            exit_code = EXIT_PROVIDER
-            failure_category = "provider_failed"
-            provider_status = "failed"
-            provider_skip_reason = None
-            provider_failure_category = "unavailable"
+            try:
+                provider_client = translation_provider(provider)
+                outcomes = _generate_outcomes(
+                    provider_client=provider_client,
+                    outcomes=outcomes,
+                    canonical=canonical,
+                    source_locale=artifacts.manifest["project"]["authoritative_locale"],
+                    target_locale=normalized_target_locale,
+                )
+                exit_code = EXIT_OK
+                failure_category = None
+                provider_status = "used"
+                provider_skip_reason = None
+            except Exception:
+                outcomes = _mark_provider_unavailable(outcomes)
+                exit_code = EXIT_PROVIDER
+                failure_category = "provider_failed"
+                provider_status = "failed"
+                provider_skip_reason = None
+                provider_failure_category = "unavailable"
     elif any(item["outcome"] == "failed" for item in outcomes):
         exit_code = EXIT_BLOCKING_FINDINGS
         failure_category = None
@@ -238,7 +260,7 @@ def translate_project(
 
     validation_findings: list[dict] = []
     files: dict[Path, bytes] = {}
-    if exit_code == EXIT_OK and not dry_run:
+    if exit_code == EXIT_OK:
         staged_entries = _staged_target_entries(canonical_keys, target_entries, outcomes)
         staged_content = serialize_localization(staged_entries, target["format"])
         staged_parsed = parse_localization(staged_content, target["format"])
@@ -246,7 +268,7 @@ def translate_project(
         if validation_findings:
             exit_code = EXIT_BLOCKING_FINDINGS
             failure_category = "blocking_validation_findings"
-        else:
+        elif not dry_run:
             files[target_file] = staged_content.encode("utf-8")
 
     return _write_translation_report(
@@ -263,6 +285,7 @@ def translate_project(
         failure_category=failure_category,
         dry_run=dry_run,
         no_provider=no_provider,
+        provider=provider,
         files=files,
         provider_skip_reason=provider_skip_reason,
         provider_failure_category=provider_failure_category,
@@ -413,6 +436,7 @@ def _write_translation_report(
     failure_category: str | None,
     dry_run: bool,
     no_provider: bool,
+    provider: str,
     files: dict[Path, bytes] | None = None,
     provider_skip_reason: str | None = None,
     provider_failure_category: str | None = None,
@@ -446,6 +470,7 @@ def _write_translation_report(
             "reuse_mode": reuse_mode,
             "dry_run": dry_run,
             "no_provider": no_provider,
+            "provider": provider,
         },
         summary={
             "key_count": len(per_key_outcomes),
@@ -542,6 +567,40 @@ def _mark_provider_unavailable(outcomes: list[dict]) -> list[dict]:
     return marked
 
 
+def _generate_outcomes(
+    *,
+    provider_client,
+    outcomes: list[dict],
+    canonical: dict,
+    source_locale: str,
+    target_locale: str,
+) -> list[dict]:
+    generated: list[dict] = []
+    for item in outcomes:
+        if item["outcome"] != "generated":
+            generated.append(item)
+            continue
+        canonical_entry = canonical["entries"][item["key"]]
+        response = provider_client.translate(
+            TranslationRequest(
+                key=item["key"],
+                source_value=canonical_entry["authoritative_value"],
+                source_locale=source_locale,
+                target_locale=target_locale,
+                placeholder_signature=canonical_entry["placeholder_signature"],
+            )
+        )
+        generated.append(
+            _outcome(
+                item["key"],
+                "generated",
+                tm_record_id=item.get("tm_record_id"),
+                target_value=response.target_value,
+            )
+        )
+    return generated
+
+
 def _staged_target_entries(
     canonical_keys: list[str],
     target_entries: dict[str, ParsedEntry],
@@ -551,7 +610,7 @@ def _staged_target_entries(
     outcome_by_key = {item["key"]: item for item in outcomes}
     for key in canonical_keys:
         outcome = outcome_by_key[key]
-        if outcome["outcome"] == "reused":
+        if outcome["outcome"] in {"reused", "generated"}:
             value = outcome["target_value"]
         else:
             value = target_entries[key].value
