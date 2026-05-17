@@ -36,6 +36,34 @@ For Codex-like command wrappers, prefer:
 
 This matches the envelope shapes used by fake Codex-shaped smoke tests without requiring the real Codex CLI yet.
 
+## Local Codex Wrapper Smoke
+
+The repo includes an experimental local wrapper:
+
+```text
+scripts/codex_parley_provider.py
+```
+
+Use it only with dummy/demo strings while the provider surface is still settling:
+
+```text
+PYTHONPATH=src python3 -m parley translate \
+  --project-root <demo-project> \
+  --target-locale fr-FR \
+  --reuse-mode provider_only \
+  --provider command-json \
+  --provider-command ./scripts/codex_parley_provider.py \
+  --provider-response-mode stdout_json \
+  --provider-timeout-seconds 180
+```
+
+The wrapper reads Parley's provider request, calls `codex exec` with a strict Parley provider-response schema, and prints the resulting JSON response for the generic `command-json` adapter to validate.
+
+Environment knobs:
+
+- `PARLEY_CODEX_COMMAND`: defaults to `codex`
+- `PARLEY_CODEX_TIMEOUT_SECONDS`: defaults to `120`
+
 ## File-Backed Transport
 
 For CLIs that need file paths instead of stdin/stdout JSON:
