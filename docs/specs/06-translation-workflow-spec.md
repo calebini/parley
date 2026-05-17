@@ -11,6 +11,7 @@ It depends on:
 - [Placeholder and Token Integrity Specification](04-placeholder-token-integrity-spec.md)
 - [Confidence Model Specification](05-confidence-model-spec.md)
 - [Translation Memory Specification](08-translation-memory-spec.md)
+- [Provider CLI Adapter Protocol Specification](09-provider-cli-adapter-protocol-spec.md)
 
 ## 2. Provider Interface
 
@@ -24,6 +25,8 @@ class TranslationProvider(Protocol):
 ```
 
 Provider responses MUST be validated before use. Invalid provider output after retries is exit code `4`.
+
+Command-line provider adapters are governed by the Provider CLI Adapter Protocol Specification. This workflow spec owns which entries need provider generation and how validated provider results are consumed; the provider CLI protocol owns process invocation, request/response envelopes, schema validation, telemetry, and provider process failure classification.
 
 ## 3. Translation Request Entry
 

@@ -1,6 +1,6 @@
 # Parley MVP Implementation Plan
 
-Updated: 2026-05-15
+Updated: 2026-05-17
 
 This plan turns the converged Parley MVP specs into an implementation sequence. It is intentionally broad enough to keep later slices visible, but concrete enough to make the first slice executable.
 
@@ -12,6 +12,7 @@ Authoritative or build-target inputs:
 - [CLI Command Spec](specs/01-cli-command-spec.md)
 - [Project Artifact Schema Spec](specs/02-project-artifact-schema-spec.md)
 - [Validation and Error Taxonomy Spec](specs/07-validation-error-taxonomy-spec.md)
+- [Provider CLI Adapter Protocol Spec](specs/09-provider-cli-adapter-protocol-spec.md)
 
 Supporting inputs:
 
@@ -24,6 +25,7 @@ Implementation stance:
 - Treat paired-file translation, non-project report roots, diagnostic mode, exhaustive report schemas, retry/resume matrices, and broad production operability as post-MVP unless explicitly promoted.
 - Prefer small, deterministic, testable service boundaries over large orchestration flows.
 - Let leaf specs own detailed contracts; the HLD owns architecture boundaries.
+- Keep the provider CLI command runner generic where practical, but keep Parley translation semantics in the provider/translation layer.
 
 ## Slice Roadmap
 
@@ -253,6 +255,8 @@ Exit criteria:
 
 Goal: implement `parley translate` for project mode.
 
+Status: initial MVP implementation complete with dummy-provider generation, translation-memory reuse/write-back, deterministic per-key outcomes, dry-run support, project-scoped translation reports, and iOS/Android smoke coverage.
+
 Scope:
 
 - Load project artifacts and canonical key order.
@@ -268,7 +272,68 @@ Exit criteria:
 - Partial file replacement failures roll back or restore according to the CLI spec.
 - Translation reports are stable and project-scoped.
 
-### Slice 9: Integration and Hardening
+Implemented notes:
+
+- Current provider support is intentionally limited to the deterministic dummy provider.
+- Real LLM provider work now has its own protocol authority in the Provider CLI Adapter Protocol spec.
+- Translation memory write-back exists for generated output; richer review/audit expansion remains deferred.
+
+### Slice 9: Provider CLI Adapter
+
+Goal: replace the dummy-only provider path with a generic command-backed JSON adapter that can support Codex/Claude-style CLIs without baking those CLIs into translation workflow logic.
+
+Status: initial core implemented for `stdin_json` request delivery and `stdout_json` response parsing with fake CLI tests. The provider CLI adapter protocol has reached Whetstone MVP convergence and has been applied back to the source spec.
+
+Scope:
+
+- Add a generic `CommandJsonAdapter` with no Parley translation semantics.
+- Support `stdin_json` request delivery first.
+- Support `stdout_json` response mode first.
+- Execute provider commands as explicit argv lists, with no shell interpolation.
+- Resolve working directory deterministically.
+- Enforce positive `timeout_seconds`.
+- Capture stdout, stderr, exit code, duration, timeout flag, and basic token/usage metadata when available.
+- Parse exactly one JSON object from the configured response source.
+- Classify process launch failure, timeout, non-zero exit, non-JSON output, non-object JSON, and schema/shape-invalid output.
+- Add fake CLI tests covering success and the required failure paths.
+- Add a Parley translation-provider wrapper that maps validated adapter responses into the existing translation workflow.
+
+Exit criteria:
+
+- A fake CLI provider can generate translations through `parley translate`.
+- Adapter failures do not mutate target localization files.
+- Translation reports expose the correct provider status/failure category for required provider work.
+- The adapter returns generic invocation results that could be reused by another Parley provider workflow later.
+- Existing dummy-provider smoke tests still pass.
+
+Out of scope for the first provider adapter slice:
+
+- `output_file_json` transport.
+- `stdin_prompt` and `argument_prompt` transports.
+- Hosted API adapters.
+- Streaming responses.
+- Interactive auth.
+- Retry/backoff implementation beyond preserving the protocol boundary.
+- Full raw prompt/response diagnostic logging.
+
+### Slice 10: Provider CLI Transport Expansion
+
+Goal: add the transport modes needed by real-world LLM CLIs after the core command adapter is stable.
+
+Scope:
+
+- Add `output_file_json` request/response transport.
+- Add deterministic `io_dir` handling and cleanup behavior.
+- Add known-envelope unwrapping for CLIs that return `structured_output` or JSON strings in `result`.
+- Add Codex/Claude-oriented adapter configuration helpers if the generic adapter proves sufficient.
+
+Exit criteria:
+
+- Fake CLI tests cover file transport and envelope unwrapping.
+- A local configured CLI can be smoke-tested without production strings.
+- Provider-specific wrappers stay thin.
+
+### Slice 11: Integration and Hardening
 
 Goal: make the MVP coherent enough to use end to end.
 
@@ -286,14 +351,15 @@ Exit criteria:
 
 ## First Implementation Slice: Immediate Task List
 
-1. Inspect repository package/tooling state.
-2. Add or confirm the Python package, CLI entrypoint, and tests.
-3. Implement project-root and relative-path canonicalization helpers.
-4. Implement deterministic JSON/YAML writers.
-5. Implement report path resolution and non-overwrite guard.
-6. Implement `parley project init` artifact generation.
-7. Add tests for init success and failure/rollback behavior.
-8. Update this plan with any implementation discoveries.
+1. Add `src/parley/command_json.py` with a generic result/failure/telemetry model.
+2. Implement explicit-argv subprocess execution with cwd resolution and timeout handling.
+3. Implement `stdin_json` request delivery and `stdout_json` response parsing.
+4. Add a validation hook that can enforce the provider response shape without coupling the adapter to translation semantics.
+5. Add fake CLI fixtures/tests for success, non-zero exit, timeout, non-JSON stdout, non-object JSON, missing entries, duplicate entries, and provider refusal/failure.
+6. Add a Parley provider wrapper that converts translation requests to adapter request JSON and validated adapter responses back to translation results.
+7. Wire one non-dummy provider ID behind a test-only fake command path before attempting Codex/Claude CLI configuration.
+8. Run the existing smoke tests plus the new provider adapter tests.
+9. Update this plan with implementation discoveries before adding `output_file_json`.
 
 ## Deferred Until Explicitly Promoted
 
@@ -305,3 +371,5 @@ Exit criteria:
 - Retry/resume matrices.
 - Governance-grade convergence proof.
 - Translation memory JSONL import/export.
+- Provider CLI `output_file_json`, `stdin_prompt`, and `argument_prompt` transports until the core adapter works.
+- Real production provider configuration until fake CLI adapter coverage is solid.

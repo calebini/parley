@@ -62,7 +62,9 @@ def build_parser() -> argparse.ArgumentParser:
     translate.add_argument("--target-locale", required=True)
     translate.add_argument("--target-path")
     translate.add_argument("--reuse-mode", choices=["tm_only", "tm_then_provider", "provider_only"], default="tm_then_provider")
-    translate.add_argument("--provider", choices=["dummy"], default="dummy")
+    translate.add_argument("--provider", choices=["dummy", "command-json"], default="dummy")
+    translate.add_argument("--provider-command")
+    translate.add_argument("--provider-timeout-seconds", type=int, default=30)
     translate.add_argument("--dry-run", action="store_true")
     translate.add_argument("--no-provider", action="store_true")
     translate.add_argument("--report-dir")
@@ -156,6 +158,8 @@ def main(argv: list[str] | None = None) -> int:
             target_path=args.target_path,
             reuse_mode=args.reuse_mode,
             provider=args.provider,
+            provider_command=args.provider_command,
+            provider_timeout_seconds=args.provider_timeout_seconds,
             dry_run=args.dry_run,
             no_provider=args.no_provider,
             report_dir=args.report_dir,

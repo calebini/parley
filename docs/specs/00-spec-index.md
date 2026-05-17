@@ -12,6 +12,7 @@ This directory contains the v1 supporting specification set for Parley:
 6. [Translation Workflow Specification](06-translation-workflow-spec.md)
 7. [Validation and Error Taxonomy Specification](07-validation-error-taxonomy-spec.md)
 8. [Translation Memory Specification](08-translation-memory-spec.md)
+9. [Provider CLI Adapter Protocol Specification](09-provider-cli-adapter-protocol-spec.md)
 
 ## 2. Shared v1 Contracts
 
@@ -92,4 +93,3 @@ schema_version: "1.0"
 - Translation workflow lookup order and translation memory lookup order are intentionally identical.
 - Project-mode translation requires context anchor data; paired-file translation and paired semantic comparison do not use the project context anchor.
 - Policy promotion can make a finding blocking for CI without mutating the original severity.
-

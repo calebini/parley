@@ -10,7 +10,7 @@ from parley.errors import EXIT_BLOCKING_FINDINGS, EXIT_IO_OR_PARSER, EXIT_OK, EX
 from parley.hashing import sha256_canonical_json
 from parley.parsers import ParsedEntry, parse_localization, serialize_localization
 from parley.paths import canonical_relative_path, resolve_report_dir
-from parley.providers import TranslationRequest, translation_provider
+from parley.providers import ProviderConfigurationError, ProviderInvocationError, TranslationRequest, translation_provider
 from parley.reports import prepare_report, utc_now
 from parley.validation import CommandResult
 
@@ -39,6 +39,8 @@ def translate_project(
     no_provider: bool,
     report_dir: str | None,
     cwd: Path,
+    provider_command: str | None = None,
+    provider_timeout_seconds: int = 30,
 ) -> CommandResult:
     started_at = utc_now()
     try:
@@ -233,7 +235,12 @@ def translate_project(
             provider_skip_reason = "no_provider"
         else:
             try:
-                provider_client = translation_provider(provider)
+                provider_client = translation_provider(
+                    provider,
+                    provider_command=provider_command,
+                    project_root=root,
+                    timeout_seconds=provider_timeout_seconds,
+                )
                 outcomes = _generate_outcomes(
                     provider_client=provider_client,
                     outcomes=outcomes,
@@ -246,13 +253,30 @@ def translate_project(
                 failure_category = None
                 provider_status = "used"
                 provider_skip_reason = None
+            except ProviderInvocationError as exc:
+                outcomes = _mark_provider_unavailable(outcomes)
+                exit_code = EXIT_PROVIDER
+                failure_category = "provider_failed"
+                provider_status = "failed"
+                provider_skip_reason = None
+                provider_failure_category = exc.classification
+            except ProviderConfigurationError as exc:
+                outcomes = [
+                    _replace_generated(item, "provider_disallowed")
+                    for item in outcomes
+                ]
+                exit_code = EXIT_USAGE_OR_SCHEMA
+                failure_category = "provider_disallowed"
+                provider_status = "skipped"
+                provider_skip_reason = "invalid_configuration"
+                provider_failure_category = "invalid_configuration"
             except Exception:
                 outcomes = _mark_provider_unavailable(outcomes)
                 exit_code = EXIT_PROVIDER
                 failure_category = "provider_failed"
                 provider_status = "failed"
                 provider_skip_reason = None
-                provider_failure_category = "unavailable"
+                provider_failure_category = "provider_unavailable"
     elif any(item["outcome"] == "failed" for item in outcomes):
         exit_code = EXIT_BLOCKING_FINDINGS
         failure_category = None

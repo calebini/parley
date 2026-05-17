@@ -5,6 +5,7 @@ from pathlib import Path
 import sqlite3
 import sys
 import tempfile
+import textwrap
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -301,6 +302,133 @@ class TranslateTests(unittest.TestCase):
             self.assertEqual(rows["tm-hello-new"]["updated_at"], "2026-05-15T19:00:00.000000Z")
             self.assertEqual(rows["tm-hello-old"]["is_current"], 0)
 
+    def test_translate_command_json_provider_generates_with_fake_cli(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            init_project(root)
+            _populate_context_anchor(root)
+            target = _add_empty_target(root)
+            provider = _fake_provider_script(
+                root,
+                """
+                import json
+                import sys
+                request = json.loads(sys.stdin.read())
+                entries = [
+                    {
+                        "key": entry["key"],
+                        "status": "translated",
+                        "translated_text": "[cli] " + entry["source_text"],
+                        "failure_reason": None,
+                    }
+                    for entry in request["entries"]
+                ]
+                print(json.dumps({
+                    "schema_version": "1.0",
+                    "request_id": request["request_id"],
+                    "provider_id": request["provider_id"],
+                    "status": "ok",
+                    "entries": entries,
+                    "provider_metadata": None,
+                }))
+                """,
+            )
+
+            with stable_run_env("2026-05-15T20:00:00.000000Z", "f" * 32):
+                code = run_cli(
+                    [
+                        "translate",
+                        "--project-root",
+                        str(root),
+                        "--target-locale",
+                        "fr-FR",
+                        "--reuse-mode",
+                        "provider_only",
+                        "--provider",
+                        "command-json",
+                        "--provider-command",
+                        str(provider),
+                    ]
+                )
+
+            self.assertEqual(code, 0)
+            self.assertEqual(
+                target.read_text(encoding="utf-8"),
+                '"bye" = "[cli] Bye";\n"hello" = "[cli] Hello %@";\n',
+            )
+            report = root / "reports" / "translation" / "translate--20260515T200000000000Z-ffffffffffffffffffffffffffffffff.json"
+            payload = json.loads(report.read_text(encoding="utf-8"))
+            self.assertEqual(payload["provider_status"], "used")
+            self.assertEqual(payload["summary"]["provider_id"], "command-json")
+            self.assertEqual([item["outcome"] for item in payload["per_key_outcomes"]], ["generated", "generated"])
+
+    def test_translate_command_json_provider_failure_does_not_write_target(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            init_project(root)
+            _populate_context_anchor(root)
+            target = _add_empty_target(root)
+            provider = _fake_provider_script(root, "import sys\nsys.exit(9)\n")
+
+            with stable_run_env("2026-05-15T21:00:00.000000Z", "1" * 32):
+                code = run_cli(
+                    [
+                        "translate",
+                        "--project-root",
+                        str(root),
+                        "--target-locale",
+                        "fr-FR",
+                        "--reuse-mode",
+                        "provider_only",
+                        "--provider",
+                        "command-json",
+                        "--provider-command",
+                        str(provider),
+                    ]
+                )
+
+            self.assertEqual(code, 4)
+            self.assertEqual(target.read_text(encoding="utf-8"), "")
+            report = root / "reports" / "translation" / "translate--20260515T210000000000Z-11111111111111111111111111111111.json"
+            payload = json.loads(report.read_text(encoding="utf-8"))
+            self.assertEqual(payload["provider_status"], "failed")
+            self.assertEqual(payload["provider_failure_category"], "provider_process_failed")
+            self.assertEqual(
+                [item["category"] for item in payload["per_key_outcomes"]],
+                ["provider_failed", "provider_not_attempted_after_failure"],
+            )
+
+    def test_translate_command_json_missing_command_is_usage_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            init_project(root)
+            _populate_context_anchor(root)
+            target = _add_empty_target(root)
+
+            with stable_run_env("2026-05-15T22:00:00.000000Z", "2" * 32):
+                code = run_cli(
+                    [
+                        "translate",
+                        "--project-root",
+                        str(root),
+                        "--target-locale",
+                        "fr-FR",
+                        "--reuse-mode",
+                        "provider_only",
+                        "--provider",
+                        "command-json",
+                    ]
+                )
+
+            self.assertEqual(code, 2)
+            self.assertEqual(target.read_text(encoding="utf-8"), "")
+            report = root / "reports" / "translation" / "translate--20260515T220000000000Z-22222222222222222222222222222222.json"
+            payload = json.loads(report.read_text(encoding="utf-8"))
+            self.assertEqual(payload["failure_category"], "provider_disallowed")
+            self.assertEqual(payload["provider_status"], "skipped")
+            self.assertEqual(payload["provider_skip_reason"], "invalid_configuration")
+            self.assertEqual(payload["provider_failure_category"], "invalid_configuration")
+
 
 def _populate_context_anchor(root: Path) -> None:
     canonical = json.loads((root / "canonical-inventory.json").read_text(encoding="utf-8"))
@@ -406,6 +534,13 @@ def _summary_flags(payload: dict) -> tuple[bool, bool, bool, str, str]:
         summary["provider_id"],
         summary["provider_status"],
     )
+
+
+def _fake_provider_script(root: Path, source: str) -> Path:
+    path = root / "fake_provider"
+    path.write_text("#!/usr/bin/env python3\n" + textwrap.dedent(source).lstrip(), encoding="utf-8")
+    path.chmod(path.stat().st_mode | 0o111)
+    return path
 
 
 if __name__ == "__main__":
