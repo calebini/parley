@@ -490,6 +490,133 @@ class TranslateTests(unittest.TestCase):
             )
             self.assertEqual(list((root / ".parley/provider-io").glob("*.json")), [])
 
+    def test_translate_command_json_provider_accepts_codex_structured_output_envelope(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            init_project(root)
+            _populate_context_anchor(root)
+            target = _add_empty_target(root)
+            provider = _fake_provider_script(
+                root,
+                """
+                import json
+                import sys
+                request = json.loads(sys.stdin.read())
+                entries = [
+                    {
+                        "key": entry["key"],
+                        "status": "translated",
+                        "translated_text": "[codex-envelope] " + entry["source_text"],
+                        "failure_reason": None,
+                    }
+                    for entry in request["entries"]
+                ]
+                structured_output = {
+                    "schema_version": "1.0",
+                    "request_id": request["request_id"],
+                    "provider_id": request["provider_id"],
+                    "status": "ok",
+                    "entries": entries,
+                    "provider_metadata": {"envelope": "structured_output"},
+                }
+                print(json.dumps({
+                    "type": "result",
+                    "structured_output": structured_output,
+                    "usage": {"total_tokens": 17},
+                }))
+                """,
+            )
+
+            with stable_run_env("2026-05-16T00:00:00.000000Z", "4" * 32):
+                code = run_cli(
+                    [
+                        "translate",
+                        "--project-root",
+                        str(root),
+                        "--target-locale",
+                        "fr-FR",
+                        "--reuse-mode",
+                        "provider_only",
+                        "--provider",
+                        "command-json",
+                        "--provider-command",
+                        str(provider),
+                        "--provider-response-mode",
+                        "stdout_json_envelope",
+                    ]
+                )
+
+            self.assertEqual(code, 0)
+            self.assertEqual(
+                target.read_text(encoding="utf-8"),
+                '"bye" = "[codex-envelope] Bye";\n"hello" = "[codex-envelope] Hello %@";\n',
+            )
+            report = root / "reports" / "translation" / "translate--20260516T000000000000Z-44444444444444444444444444444444.json"
+            payload = json.loads(report.read_text(encoding="utf-8"))
+            self.assertEqual(payload["provider_status"], "used")
+            self.assertEqual(payload["summary"]["provider_id"], "command-json")
+
+    def test_translate_command_json_provider_accepts_codex_result_json_string_envelope(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            init_project(root)
+            _populate_context_anchor(root)
+            target = _add_empty_target(root)
+            provider = _fake_provider_script(
+                root,
+                """
+                import json
+                import sys
+                request = json.loads(sys.stdin.read())
+                parley_response = {
+                    "schema_version": "1.0",
+                    "request_id": request["request_id"],
+                    "provider_id": request["provider_id"],
+                    "status": "ok",
+                    "entries": [
+                        {
+                            "key": entry["key"],
+                            "status": "translated",
+                            "translated_text": "[codex-result] " + entry["source_text"],
+                            "failure_reason": None,
+                        }
+                        for entry in request["entries"]
+                    ],
+                    "provider_metadata": {"envelope": "result"},
+                }
+                print(json.dumps({
+                    "type": "result",
+                    "result": json.dumps(parley_response),
+                    "usage": {"total_tokens": 19},
+                }))
+                """,
+            )
+
+            with stable_run_env("2026-05-16T01:00:00.000000Z", "5" * 32):
+                code = run_cli(
+                    [
+                        "translate",
+                        "--project-root",
+                        str(root),
+                        "--target-locale",
+                        "fr-FR",
+                        "--reuse-mode",
+                        "provider_only",
+                        "--provider",
+                        "command-json",
+                        "--provider-command",
+                        str(provider),
+                        "--provider-response-mode",
+                        "stdout_json_envelope",
+                    ]
+                )
+
+            self.assertEqual(code, 0)
+            self.assertEqual(
+                target.read_text(encoding="utf-8"),
+                '"bye" = "[codex-result] Bye";\n"hello" = "[codex-result] Hello %@";\n',
+            )
+
 
 def _populate_context_anchor(root: Path) -> None:
     canonical = json.loads((root / "canonical-inventory.json").read_text(encoding="utf-8"))

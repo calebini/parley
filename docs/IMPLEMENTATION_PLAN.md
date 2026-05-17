@@ -320,7 +320,7 @@ Out of scope for the first provider adapter slice:
 
 Goal: add the transport modes needed by real-world LLM CLIs after the core command adapter is stable.
 
-Status: initial implementation complete for `output_file_json` transport and `stdout_json_envelope` unwrapping, with fake CLI coverage.
+Status: initial implementation complete for `output_file_json` transport and `stdout_json_envelope` unwrapping, with fake CLI coverage and Codex-shaped envelope smoke tests.
 
 Scope:
 
