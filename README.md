@@ -33,8 +33,8 @@ Parley currently supports a local MVP workflow:
   - `glossary.yaml`
   - `translation-memory.sqlite`
   - JSON reports under `reports/`
-- Parse and validate iOS `.strings` files.
-- Parse and serialize Android XML string resources at the adapter level.
+- Parse, validate, translate, and reuse iOS `.strings` files in an end-to-end demo flow.
+- Parse, validate, translate, and reuse Android XML string resources in an end-to-end demo flow.
 - Add target localizations to project inventory.
 - Validate targets against the canonical source:
   - missing keys
@@ -150,6 +150,8 @@ PYTHONPATH=src python3 -m parley translate \
 
 The second translate should refill the target from `translation-memory.sqlite` without provider work.
 
+The same project workflow is also covered by `examples/android-demo`, which exercises Android XML parsing, XML escaping, placeholder preservation, validation, translation write-back, and translation-memory reuse.
+
 ## Reports You Can Trust
 
 Parley writes JSON reports so humans and CI can inspect what happened.
@@ -229,7 +231,7 @@ Parley is early. The current implementation proves the project workflow and loca
 - Real provider adapters.
 - Rich context generation.
 - Human review and approval commands.
-- Expanded Android XML end-to-end fixtures.
+- Richer Android XML fixtures and edge-case coverage.
 - Glossary enforcement.
 - Confidence scoring and review evidence.
 - Import/export for translation memory.

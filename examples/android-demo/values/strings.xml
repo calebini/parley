@@ -1,0 +1,8 @@
+<resources>
+    <string name="app_name">Pocket Tasks</string>
+    <string name="home_greeting">Hello, %1$s</string>
+    <string name="task_count">%d tasks due today</string>
+    <string name="sync_status">Last synced {time}</string>
+    <string name="upgrade_cta">Upgrade &amp; keep planning</string>
+    <string name="error_network">We couldn&apos;t reach the server. Try again.</string>
+</resources>
