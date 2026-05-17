@@ -105,6 +105,68 @@ class ValidationAndLocalizationTests(unittest.TestCase):
             self.assertEqual(code, 2)
             self.assertEqual(before, after)
 
+    def test_localization_add_malformed_target_writes_parse_failure_report(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            init_project(root)
+            target = root / "fr.lproj" / "Localizable.strings"
+            target.parent.mkdir()
+            target.write_text('"hello" = "Bonjour"\n', encoding="utf-8")
+
+            with stable_run_env("2026-05-15T07:00:00.000000Z", "2" * 32):
+                code = run_cli(
+                    [
+                        "localization",
+                        "add",
+                        str(target),
+                        "--project-root",
+                        str(root),
+                        "--locale",
+                        "fr-FR",
+                    ]
+                )
+
+            self.assertEqual(code, 3)
+            report = root / "reports" / "validation" / "localization_add--20260515T070000000000Z-22222222222222222222222222222222.json"
+            payload = json.loads(report.read_text(encoding="utf-8"))
+            self.assertEqual(payload["failure_category"], "precondition_failed")
+            self.assertEqual(payload["findings"][0]["code"], "parse_error")
+            self.assertEqual(payload["findings"][0]["failure_category"], "parser")
+
+    def test_validate_malformed_target_writes_parse_failure_report(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            init_project(root)
+            target = root / "fr.lproj" / "Localizable.strings"
+            target.parent.mkdir()
+            target.write_text('"hello" = "Bonjour %@";\n"bye" = "Au revoir";\n', encoding="utf-8")
+            with stable_run_env("2026-05-15T08:00:00.000000Z", "3" * 32):
+                self.assertEqual(
+                    run_cli(
+                        [
+                            "localization",
+                            "add",
+                            str(target),
+                            "--project-root",
+                            str(root),
+                            "--locale",
+                            "fr-FR",
+                        ]
+                    ),
+                    0,
+                )
+            target.write_text('"hello" = "Bonjour %@";\n"bye" = "Au revoir"\n', encoding="utf-8")
+
+            with stable_run_env("2026-05-15T09:00:00.000000Z", "4" * 32):
+                code = run_cli(["validate", "--project-root", str(root), "--no-authoritative"])
+
+            self.assertEqual(code, 3)
+            report = root / "reports" / "validation" / "validate--20260515T090000000000Z-44444444444444444444444444444444.json"
+            payload = json.loads(report.read_text(encoding="utf-8"))
+            self.assertEqual(payload["failure_category"], "parse_error")
+            self.assertEqual(payload["validated_localizations"][0]["status"], "parse_error")
+            self.assertEqual(payload["findings"][0]["code"], "parse_error")
+
 
 if __name__ == "__main__":
     unittest.main()
