@@ -429,6 +429,67 @@ class TranslateTests(unittest.TestCase):
             self.assertEqual(payload["provider_skip_reason"], "invalid_configuration")
             self.assertEqual(payload["provider_failure_category"], "invalid_configuration")
 
+    def test_translate_command_json_provider_uses_output_file_transport(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            init_project(root)
+            _populate_context_anchor(root)
+            target = _add_empty_target(root)
+            provider = _fake_provider_script(
+                root,
+                """
+                import json
+                import os
+                request = json.loads(open(os.environ["PARLEY_REQUEST_PATH"], encoding="utf-8").read())
+                entries = [
+                    {
+                        "key": entry["key"],
+                        "status": "translated",
+                        "translated_text": "[file] " + entry["source_text"],
+                        "failure_reason": None,
+                    }
+                    for entry in request["entries"]
+                ]
+                with open(os.environ["PARLEY_RESPONSE_PATH"], "w", encoding="utf-8") as output:
+                    json.dump({
+                        "schema_version": "1.0",
+                        "request_id": request["request_id"],
+                        "provider_id": request["provider_id"],
+                        "status": "ok",
+                        "entries": entries,
+                        "provider_metadata": None,
+                    }, output)
+                """,
+            )
+
+            with stable_run_env("2026-05-15T23:00:00.000000Z", "3" * 32):
+                code = run_cli(
+                    [
+                        "translate",
+                        "--project-root",
+                        str(root),
+                        "--target-locale",
+                        "fr-FR",
+                        "--reuse-mode",
+                        "provider_only",
+                        "--provider",
+                        "command-json",
+                        "--provider-command",
+                        str(provider),
+                        "--provider-request-delivery",
+                        "output_file",
+                        "--provider-response-mode",
+                        "output_file_json",
+                    ]
+                )
+
+            self.assertEqual(code, 0)
+            self.assertEqual(
+                target.read_text(encoding="utf-8"),
+                '"bye" = "[file] Bye";\n"hello" = "[file] Hello %@";\n',
+            )
+            self.assertEqual(list((root / ".parley/provider-io").glob("*.json")), [])
+
 
 def _populate_context_anchor(root: Path) -> None:
     canonical = json.loads((root / "canonical-inventory.json").read_text(encoding="utf-8"))

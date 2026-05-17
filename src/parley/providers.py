@@ -53,10 +53,20 @@ class ProviderConfigurationError(ValueError):
 class CommandJsonTranslationProvider(TranslationProvider):
     provider_id = "command-json"
 
-    def __init__(self, *, command: str, cwd: Path, timeout_seconds: int = 30) -> None:
+    def __init__(
+        self,
+        *,
+        command: str,
+        cwd: Path,
+        timeout_seconds: int = 30,
+        request_delivery: str = "stdin_json",
+        response_mode: str = "stdout_json",
+    ) -> None:
         self.command = command
         self.cwd = cwd
         self.timeout_seconds = timeout_seconds
+        self.request_delivery = request_delivery
+        self.response_mode = response_mode
 
     def translate(self, request: TranslationRequest) -> TranslationResponse:
         request_payload = _translation_request_payload(
@@ -68,6 +78,8 @@ class CommandJsonTranslationProvider(TranslationProvider):
                 command=self.command,
                 cwd=self.cwd,
                 timeout_seconds=self.timeout_seconds,
+                request_delivery=self.request_delivery,
+                response_mode=self.response_mode,
             ),
             validator=lambda artifact: _validate_translation_response(artifact, request_payload, request.key),
         )
@@ -87,6 +99,8 @@ def translation_provider(
     provider_command: str | None = None,
     project_root: Path | None = None,
     timeout_seconds: int = 30,
+    request_delivery: str = "stdin_json",
+    response_mode: str = "stdout_json",
 ) -> TranslationProvider:
     if provider_id == "dummy":
         return DummyTranslationProvider()
@@ -99,6 +113,8 @@ def translation_provider(
             command=provider_command,
             cwd=project_root or Path.cwd(),
             timeout_seconds=timeout_seconds,
+            request_delivery=request_delivery,
+            response_mode=response_mode,
         )
     raise ValueError(f"unsupported translation provider: {provider_id}")
 

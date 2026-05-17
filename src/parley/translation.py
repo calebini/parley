@@ -41,6 +41,8 @@ def translate_project(
     cwd: Path,
     provider_command: str | None = None,
     provider_timeout_seconds: int = 30,
+    provider_request_delivery: str = "stdin_json",
+    provider_response_mode: str = "stdout_json",
 ) -> CommandResult:
     started_at = utc_now()
     try:
@@ -240,6 +242,8 @@ def translate_project(
                     provider_command=provider_command,
                     project_root=root,
                     timeout_seconds=provider_timeout_seconds,
+                    request_delivery=provider_request_delivery,
+                    response_mode=provider_response_mode,
                 )
                 outcomes = _generate_outcomes(
                     provider_client=provider_client,

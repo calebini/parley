@@ -65,6 +65,8 @@ def build_parser() -> argparse.ArgumentParser:
     translate.add_argument("--provider", choices=["dummy", "command-json"], default="dummy")
     translate.add_argument("--provider-command")
     translate.add_argument("--provider-timeout-seconds", type=int, default=30)
+    translate.add_argument("--provider-request-delivery", choices=["stdin_json", "output_file"], default="stdin_json")
+    translate.add_argument("--provider-response-mode", choices=["stdout_json", "stdout_json_envelope", "output_file_json"], default="stdout_json")
     translate.add_argument("--dry-run", action="store_true")
     translate.add_argument("--no-provider", action="store_true")
     translate.add_argument("--report-dir")
@@ -160,6 +162,8 @@ def main(argv: list[str] | None = None) -> int:
             provider=args.provider,
             provider_command=args.provider_command,
             provider_timeout_seconds=args.provider_timeout_seconds,
+            provider_request_delivery=args.provider_request_delivery,
+            provider_response_mode=args.provider_response_mode,
             dry_run=args.dry_run,
             no_provider=args.no_provider,
             report_dir=args.report_dir,
