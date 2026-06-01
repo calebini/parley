@@ -64,6 +64,14 @@ Environment knobs:
 - `PARLEY_CODEX_COMMAND`: defaults to `codex`
 - `PARLEY_CODEX_TIMEOUT_SECONDS`: defaults to `120`
 
+To run the full manual smoke against synthetic strings:
+
+```text
+PARLEY_RUN_CODEX_SMOKE=1 scripts/smoke_codex_provider.sh
+```
+
+This smoke creates a temporary project, initializes Parley artifacts, asks Codex to translate one dummy string, verifies placeholder preservation, verifies target write-back, and verifies translation-memory write-back. It is intentionally opt-in because it may use local Codex credentials and network access.
+
 ## File-Backed Transport
 
 For CLIs that need file paths instead of stdin/stdout JSON:
