@@ -166,6 +166,27 @@ def _validate_yaml_artifact(artifact: str, data: dict[str, Any]) -> None:
         for field in ["inventory", "canonical_inventory", "context_anchor", "glossary", "translation_memory"]:
             if not artifacts.get(field):
                 raise UsageError(f"parley.yaml missing artifacts.{field}", failure_category="artifact_schema")
+        providers = data.get("providers", {})
+        if not isinstance(providers, dict):
+            raise UsageError("parley.yaml providers must be object", failure_category="artifact_schema")
+        for provider_id, record in providers.items():
+            if not isinstance(provider_id, str) or not provider_id:
+                raise UsageError("parley.yaml provider id must be non-empty", failure_category="artifact_schema")
+            if provider_id in {"dummy", "command-json"}:
+                raise UsageError(f"parley.yaml provider id is reserved: {provider_id}", failure_category="artifact_schema")
+            if not isinstance(record, dict):
+                raise UsageError(f"parley.yaml provider config must be object: {provider_id}", failure_category="artifact_schema")
+            if record.get("type") != "command-json":
+                raise UsageError(f"parley.yaml provider has unsupported type: {provider_id}", failure_category="artifact_schema")
+            if not isinstance(record.get("command"), str) or not record["command"]:
+                raise UsageError(f"parley.yaml provider missing command: {provider_id}", failure_category="artifact_schema")
+            timeout_seconds = record.get("timeout_seconds", 30)
+            if not isinstance(timeout_seconds, int) or timeout_seconds <= 0:
+                raise UsageError(f"parley.yaml provider has invalid timeout_seconds: {provider_id}", failure_category="artifact_schema")
+            if record.get("request_delivery", "stdin_json") not in {"stdin_json", "output_file"}:
+                raise UsageError(f"parley.yaml provider has invalid request_delivery: {provider_id}", failure_category="artifact_schema")
+            if record.get("response_mode", "stdout_json") not in {"stdout_json", "stdout_json_envelope", "output_file_json"}:
+                raise UsageError(f"parley.yaml provider has invalid response_mode: {provider_id}", failure_category="artifact_schema")
     elif artifact == "inventory.yaml":
         if not data.get("project_id") or not isinstance(data.get("localizations"), list):
             raise UsageError("invalid inventory.yaml", failure_category="artifact_schema")
@@ -214,4 +235,3 @@ def _validate_sqlite(path: Path) -> None:
         raise UsageError("invalid translation-memory.sqlite", failure_category="artifact_schema") from exc
     if not row or row[0] != "1.0":
         raise UsageError("translation-memory.sqlite missing schema_version", failure_category="artifact_schema")
-

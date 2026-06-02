@@ -18,6 +18,32 @@ The implemented command-backed provider supports:
 
 The default transport is `stdin_json` request delivery plus `stdout_json` response parsing.
 
+## Project-Level Provider Config
+
+For repeatable local projects, prefer a named provider in `parley.yaml`:
+
+```yaml
+providers:
+  codex-local:
+    command: "./scripts/codex_parley_provider.py"
+    request_delivery: "stdin_json"
+    response_mode: "stdout_json"
+    timeout_seconds: 180
+    type: "command-json"
+```
+
+Then run:
+
+```text
+PYTHONPATH=src python3 -m parley translate \
+  --project-root <demo-project> \
+  --target-locale fr-FR \
+  --reuse-mode provider_only \
+  --provider codex-local
+```
+
+Named provider IDs are project-local. `dummy` and `command-json` are reserved built-ins. Provider commands execute with the Parley project root as their working directory, so relative commands should point to project-local scripts; otherwise use an absolute path. The low-level flags (`--provider-command`, `--provider-request-delivery`, `--provider-response-mode`, and `--provider-timeout-seconds`) remain available for direct smoke tests and can override the named provider config when supplied.
+
 ## Codex-Shaped Envelope
 
 For Codex-like command wrappers, prefer:

@@ -13,7 +13,7 @@ sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from helpers import init_project, run_cli, stable_run_env
-from parley.serialization import yaml_dump
+from parley.serialization import yaml_dump, yaml_load
 
 
 class TranslateTests(unittest.TestCase):
@@ -361,6 +361,130 @@ class TranslateTests(unittest.TestCase):
             self.assertEqual(payload["provider_status"], "used")
             self.assertEqual(payload["summary"]["provider_id"], "command-json")
             self.assertEqual([item["outcome"] for item in payload["per_key_outcomes"]], ["generated", "generated"])
+
+    def test_translate_named_provider_config_generates_with_fake_cli(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            init_project(root)
+            _populate_context_anchor(root)
+            target = _add_empty_target(root)
+            provider = _fake_provider_script(
+                root,
+                """
+                import json
+                import sys
+                request = json.loads(sys.stdin.read())
+                entries = [
+                    {
+                        "key": entry["key"],
+                        "status": "translated",
+                        "translated_text": "[named] " + entry["source_text"],
+                        "failure_reason": None,
+                    }
+                    for entry in request["entries"]
+                ]
+                print(json.dumps({
+                    "schema_version": "1.0",
+                    "request_id": request["request_id"],
+                    "provider_id": request["provider_id"],
+                    "status": "ok",
+                    "entries": entries,
+                    "provider_metadata": None,
+                }))
+                """,
+            )
+            _write_provider_config(
+                root,
+                "local-fake",
+                {
+                    "type": "command-json",
+                    "command": str(provider),
+                    "timeout_seconds": 5,
+                    "request_delivery": "stdin_json",
+                    "response_mode": "stdout_json",
+                },
+            )
+
+            with stable_run_env("2026-05-16T02:00:00.000000Z", "6" * 32):
+                code = run_cli(
+                    [
+                        "translate",
+                        "--project-root",
+                        str(root),
+                        "--target-locale",
+                        "fr-FR",
+                        "--reuse-mode",
+                        "provider_only",
+                        "--provider",
+                        "local-fake",
+                    ]
+                )
+
+            self.assertEqual(code, 0)
+            self.assertEqual(
+                target.read_text(encoding="utf-8"),
+                '"bye" = "[named] Bye";\n"hello" = "[named] Hello %@";\n',
+            )
+            report = root / "reports" / "translation" / "translate--20260516T020000000000Z-66666666666666666666666666666666.json"
+            payload = json.loads(report.read_text(encoding="utf-8"))
+            self.assertEqual(payload["provider_status"], "used")
+            self.assertEqual(payload["summary"]["provider_id"], "local-fake")
+            self.assertEqual([item["outcome"] for item in payload["per_key_outcomes"]], ["generated", "generated"])
+
+    def test_translate_named_provider_missing_config_is_usage_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            init_project(root)
+            _populate_context_anchor(root)
+            target = _add_empty_target(root)
+
+            with stable_run_env("2026-05-16T03:00:00.000000Z", "7" * 32):
+                code = run_cli(
+                    [
+                        "translate",
+                        "--project-root",
+                        str(root),
+                        "--target-locale",
+                        "fr-FR",
+                        "--reuse-mode",
+                        "provider_only",
+                        "--provider",
+                        "missing-provider",
+                    ]
+                )
+
+            self.assertEqual(code, 2)
+            self.assertEqual(target.read_text(encoding="utf-8"), "")
+            report = root / "reports" / "translation" / "translate--20260516T030000000000Z-77777777777777777777777777777777.json"
+            payload = json.loads(report.read_text(encoding="utf-8"))
+            self.assertEqual(payload["failure_category"], "provider_disallowed")
+            self.assertEqual(payload["provider_status"], "skipped")
+            self.assertEqual(payload["provider_skip_reason"], "invalid_configuration")
+            self.assertEqual(payload["provider_failure_category"], "invalid_configuration")
+
+    def test_translate_named_provider_schema_invalid_config_fails_before_report(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            init_project(root)
+            _populate_context_anchor(root)
+            _add_empty_target(root)
+            _write_provider_config(root, "bad-provider", {"type": "command-json", "command": "", "timeout_seconds": 5})
+
+            code = run_cli(
+                [
+                    "translate",
+                    "--project-root",
+                    str(root),
+                    "--target-locale",
+                    "fr-FR",
+                    "--reuse-mode",
+                    "provider_only",
+                    "--provider",
+                    "bad-provider",
+                ]
+            )
+
+            self.assertEqual(code, 2)
 
     def test_translate_command_json_provider_failure_does_not_write_target(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -729,6 +853,13 @@ def _fake_provider_script(root: Path, source: str) -> Path:
     path.write_text("#!/usr/bin/env python3\n" + textwrap.dedent(source).lstrip(), encoding="utf-8")
     path.chmod(path.stat().st_mode | 0o111)
     return path
+
+
+def _write_provider_config(root: Path, provider_id: str, record: dict) -> None:
+    manifest_path = root / "parley.yaml"
+    manifest = yaml_load(manifest_path.read_text(encoding="utf-8"))
+    manifest.setdefault("providers", {})[provider_id] = record
+    manifest_path.write_text(yaml_dump(manifest), encoding="utf-8")
 
 
 if __name__ == "__main__":

@@ -40,9 +40,9 @@ def translate_project(
     report_dir: str | None,
     cwd: Path,
     provider_command: str | None = None,
-    provider_timeout_seconds: int = 30,
-    provider_request_delivery: str = "stdin_json",
-    provider_response_mode: str = "stdout_json",
+    provider_timeout_seconds: int | None = None,
+    provider_request_delivery: str | None = None,
+    provider_response_mode: str | None = None,
 ) -> CommandResult:
     started_at = utc_now()
     try:
@@ -237,13 +237,21 @@ def translate_project(
             provider_skip_reason = "no_provider"
         else:
             try:
-                provider_client = translation_provider(
-                    provider,
+                resolved_provider = _resolve_provider_config(
+                    manifest=artifacts.manifest,
+                    provider=provider,
                     provider_command=provider_command,
+                    provider_timeout_seconds=provider_timeout_seconds,
+                    provider_request_delivery=provider_request_delivery,
+                    provider_response_mode=provider_response_mode,
+                )
+                provider_client = translation_provider(
+                    resolved_provider["type"],
+                    provider_command=resolved_provider["command"],
                     project_root=root,
-                    timeout_seconds=provider_timeout_seconds,
-                    request_delivery=provider_request_delivery,
-                    response_mode=provider_response_mode,
+                    timeout_seconds=resolved_provider["timeout_seconds"],
+                    request_delivery=resolved_provider["request_delivery"],
+                    response_mode=resolved_provider["response_mode"],
                 )
                 outcomes = _generate_outcomes(
                     provider_client=provider_client,
@@ -340,6 +348,62 @@ class TranslationMemoryConflict(Exception):
     def __init__(self, key: str) -> None:
         super().__init__(key)
         self.key = key
+
+
+def _resolve_provider_config(
+    *,
+    manifest: dict,
+    provider: str,
+    provider_command: str | None,
+    provider_timeout_seconds: int | None,
+    provider_request_delivery: str | None,
+    provider_response_mode: str | None,
+) -> dict:
+    if provider == "dummy":
+        return {
+            "type": "dummy",
+            "command": provider_command,
+            "timeout_seconds": 30 if provider_timeout_seconds is None else provider_timeout_seconds,
+            "request_delivery": provider_request_delivery or "stdin_json",
+            "response_mode": provider_response_mode or "stdout_json",
+        }
+    if provider == "command-json":
+        return {
+            "type": "command-json",
+            "command": provider_command,
+            "timeout_seconds": 30 if provider_timeout_seconds is None else provider_timeout_seconds,
+            "request_delivery": provider_request_delivery or "stdin_json",
+            "response_mode": provider_response_mode or "stdout_json",
+        }
+
+    configured = manifest.get("providers")
+    if not isinstance(configured, dict) or provider not in configured:
+        raise ProviderConfigurationError(f"provider is not configured: {provider}")
+    record = configured[provider]
+    if not isinstance(record, dict):
+        raise ProviderConfigurationError(f"provider config is invalid: {provider}")
+    provider_type = record.get("type")
+    if provider_type != "command-json":
+        raise ProviderConfigurationError(f"provider config has unsupported type: {provider}")
+    command = provider_command or record.get("command")
+    if not isinstance(command, str) or not command:
+        raise ProviderConfigurationError(f"provider config missing command: {provider}")
+    timeout_seconds = provider_timeout_seconds if provider_timeout_seconds is not None else record.get("timeout_seconds", 30)
+    if not isinstance(timeout_seconds, int) or timeout_seconds <= 0:
+        raise ProviderConfigurationError(f"provider config has invalid timeout_seconds: {provider}")
+    request_delivery = provider_request_delivery or record.get("request_delivery", "stdin_json")
+    if request_delivery not in {"stdin_json", "output_file"}:
+        raise ProviderConfigurationError(f"provider config has invalid request_delivery: {provider}")
+    response_mode = provider_response_mode or record.get("response_mode", "stdout_json")
+    if response_mode not in {"stdout_json", "stdout_json_envelope", "output_file_json"}:
+        raise ProviderConfigurationError(f"provider config has invalid response_mode: {provider}")
+    return {
+        "type": provider_type,
+        "command": command,
+        "timeout_seconds": timeout_seconds,
+        "request_delivery": request_delivery,
+        "response_mode": response_mode,
+    }
 
 
 def _evaluate_outcomes(
