@@ -105,17 +105,23 @@ Entries MUST be regenerated or revalidated when:
 - Placeholder signature changed.
 - Translation is missing.
 - Existing translation has blocking findings.
-- Glossary rules affecting the entry changed.
+- Glossary terms affecting the entry changed.
 - Context anchor entry changed materially.
 
 ## 8. Glossary Injection
 
-Before provider calls, the glossary engine MUST resolve applicable rules by:
+Glossary injection is independent of context-anchor mode. If project-mode translation is invoked with a context bypass such as `--no-context`, the workflow MUST still load and apply glossary constraints when a glossary is present.
+
+The glossary source of truth is the human-authored `glossary.yaml` terms artifact. Parley-generated glossary candidates MAY be used as suggestions, but they MUST NOT affect provider prompts, validation, confidence, or translation memory selection until explicitly promoted/imported into `glossary.yaml`.
+
+Before provider calls, the glossary engine MUST resolve applicable constraints by:
 
 - Source term.
-- Source locale.
+- Source locale or wildcard.
 - Target locale or wildcard.
-- Rule type.
+- Term status (`draft`, `reviewed`, `approved`, `locked`).
+- Protected/untranslated flags.
+- Preferred target terms and forbidden target terms.
 
 Provider prompts MUST include applicable:
 
@@ -125,7 +131,7 @@ Provider prompts MUST include applicable:
 - Untranslated product names.
 - Canonical terminology.
 
-Post-generation validation MUST emit `terminology` findings for violations.
+Post-generation validation MUST emit `terminology` findings for violations, including preferred target term missing, forbidden target term used, protected term altered, untranslated term translated, and ambiguous multiple glossary matches.
 
 ## 9. Placeholder Protection and Restoration
 

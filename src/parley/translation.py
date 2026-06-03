@@ -8,6 +8,7 @@ from typing import Callable
 from parley.artifacts import load_project_artifacts, resolve_project_root, schema_issues_for_required
 from parley.atomic import commit_files
 from parley.errors import EXIT_BLOCKING_FINDINGS, EXIT_IO_OR_PARSER, EXIT_OK, EXIT_PROVIDER, EXIT_USAGE_OR_SCHEMA, ParleyError, UsageError
+from parley.glossary_terms import resolve_constraints, terminology_findings
 from parley.hashing import sha256_canonical_json
 from parley.parsers import ParsedEntry, infer_format, parse_localization, serialize_localization
 from parley.paths import canonical_relative_path, resolve_report_dir
@@ -299,6 +300,9 @@ def translate_project(
                     outcomes=outcomes,
                     project_id=artifacts.project_id,
                     canonical=canonical,
+                    source_entries=source_entries,
+                    context_anchor=artifacts.context_anchor,
+                    glossary=artifacts.glossary,
                     source_locale=artifacts.manifest["project"]["authoritative_locale"],
                     target_locale=normalized_target_locale,
                     progress_callback=progress_callback,
@@ -347,7 +351,16 @@ def translate_project(
         staged_content = serialize_localization(staged_entries, target["format"])
         staged_parsed = parse_localization(staged_content, target["format"])
         validation_findings = _placeholder_findings(target, staged_parsed.entries, canonical)
-        if validation_findings:
+        validation_findings.extend(
+            _glossary_findings(
+                target=target,
+                staged_entries=staged_parsed.entries,
+                canonical=canonical,
+                source_locale=artifacts.manifest["project"]["authoritative_locale"],
+                glossary=artifacts.glossary,
+            )
+        )
+        if any(item.get("severity") == "blocking" for item in validation_findings):
             exit_code = EXIT_BLOCKING_FINDINGS
             failure_category = "blocking_validation_findings"
         elif not dry_run:
@@ -991,6 +1004,9 @@ def _generate_outcomes(
     outcomes: list[dict],
     project_id: str,
     canonical: dict,
+    source_entries: dict[str, ParsedEntry],
+    context_anchor: dict | None,
+    glossary: dict | None,
     source_locale: str,
     target_locale: str,
     progress_callback: Callable[[str, str, int, int], None] | None = None,
@@ -1018,6 +1034,16 @@ def _generate_outcomes(
                 source_locale=source_locale,
                 target_locale=target_locale,
                 placeholder_signature=canonical_entry["placeholder_signature"],
+                placeholder_tokens=source_entries[item["key"]].placeholders,
+                context_description=_context_description(context_anchor, item["key"]),
+                project_context=(context_anchor or {}).get("project_context") or {},
+                glossary_constraints=resolve_constraints(
+                    glossary,
+                    source_text=canonical_entry["authoritative_value"],
+                    source_locale=source_locale,
+                    target_locale=target_locale,
+                ),
+                translation_memory_candidates=[],
             )
         )
         tm_record_id = _generated_tm_record_id(
@@ -1079,6 +1105,48 @@ def _placeholder_findings(target: dict, entries: list[ParsedEntry], canonical: d
                 }
             )
     return findings
+
+
+def _glossary_findings(
+    *,
+    target: dict,
+    staged_entries: list[ParsedEntry],
+    canonical: dict,
+    source_locale: str,
+    glossary: dict | None,
+) -> list[dict]:
+    if not glossary:
+        return []
+    by_key = {entry.key: entry for entry in staged_entries}
+    findings: list[dict] = []
+    for key in sorted(canonical["entries"]):
+        target_entry = by_key.get(key)
+        if not target_entry:
+            continue
+        findings.extend(
+            terminology_findings(
+                glossary,
+                key=key,
+                path=target["path"],
+                locale=target["locale"],
+                source_text=canonical["entries"][key]["authoritative_value"],
+                target_text=target_entry.value,
+                source_locale=source_locale,
+            )
+        )
+    return findings
+
+
+def _context_description(context_anchor: dict | None, key: str) -> str | None:
+    if not context_anchor:
+        return None
+    entry = context_anchor.get("entries", {}).get(key)
+    if isinstance(entry, dict):
+        value = entry.get("context") or entry.get("context_description") or entry.get("description")
+        return str(value) if value else None
+    if isinstance(entry, str):
+        return entry
+    return None
 
 
 def _lower_ascii(value: str) -> str:

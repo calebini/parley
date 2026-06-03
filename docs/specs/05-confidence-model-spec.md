@@ -32,7 +32,7 @@ All confidence records MUST use these dimensions:
 | `semantic` | Confidence that source and target preserve intended meaning. |
 | `contextual` | Confidence that project and per-string context are understood. |
 | `grammatical` | Confidence in grammar and language naturalness. |
-| `terminology_compliance` | Confidence that glossary rules are followed. |
+| `terminology_compliance` | Confidence that glossary terminology constraints are followed. |
 | `placeholder_integrity` | Confidence that placeholders/tokens are preserved correctly. |
 | `clarity` | Confidence that the string is clear for intended users. |
 

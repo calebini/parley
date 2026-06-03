@@ -223,7 +223,7 @@ Each request entry MUST include:
 | `protected_text` | string | yes | Source text after Parley placeholder/sentinel protection. |
 | `context_description` | string or null | yes | Per-key context when available. |
 | `project_context` | object | yes | Minimal context needed for translation. May be empty only if the translation workflow permits provider generation for that entry. |
-| `glossary_constraints` | array | yes | Applicable glossary constraints, possibly empty. |
+| `glossary_constraints` | array | yes | Applicable terminology constraints resolved from the project `glossary.yaml` `terms` artifact, possibly empty. Each constraint SHOULD include source term, target locale scope, preferred target term when applicable, forbidden target terms when applicable, protected/untranslated flags, status, severity, and human notes when present. |
 | `placeholder_tokens` | array | yes | Placeholder/token summary from the placeholder integrity layer. |
 | `translation_memory_candidates` | array | yes | Candidate summary supplied as provider context, possibly empty. |
 

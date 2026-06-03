@@ -6,6 +6,7 @@ from pathlib import Path
 import sys
 
 from parley.errors import EXIT_USAGE_OR_SCHEMA
+from parley.glossary import glossary_import, glossary_list, glossary_suggest_from_tm, glossary_validate
 from parley.locale_reference import locale_reference_list
 from parley.localization import localization_add, localization_list
 from parley.project_init import project_init
@@ -91,6 +92,26 @@ def build_parser() -> argparse.ArgumentParser:
     locale_sub = locale.add_subparsers(dest="locale_command")
     locale_list = locale_sub.add_parser("list")
     locale_list.add_argument("--query")
+
+    glossary = subparsers.add_parser("glossary")
+    glossary_sub = glossary.add_subparsers(dest="glossary_command")
+    glossary_import_parser = glossary_sub.add_parser("import")
+    glossary_import_parser.add_argument("--project-root")
+    glossary_import_parser.add_argument("--file", required=True)
+    glossary_import_parser.add_argument("--merge-mode", choices=["replace", "merge"], default="replace")
+    glossary_import_parser.add_argument("--report-dir")
+    glossary_list_parser = glossary_sub.add_parser("list")
+    glossary_list_parser.add_argument("--project-root")
+    glossary_list_parser.add_argument("--locale")
+    glossary_list_parser.add_argument("--query")
+    glossary_validate_parser = glossary_sub.add_parser("validate")
+    glossary_validate_parser.add_argument("--project-root")
+    glossary_validate_parser.add_argument("--report-dir")
+    glossary_suggest_parser = glossary_sub.add_parser("suggest")
+    glossary_suggest_parser.add_argument("--project-root")
+    glossary_suggest_parser.add_argument("--from-tm", action="store_true", required=True)
+    glossary_suggest_parser.add_argument("--target-locale")
+    glossary_suggest_parser.add_argument("--report-dir")
 
     return parser
 
@@ -245,6 +266,64 @@ def main(argv: list[str] | None = None) -> int:
         elif not args.quiet:
             _emit_locale_reference_table(result)
         return result.exit_code
+    if args.command_group == "glossary" and args.glossary_command == "import":
+        result = glossary_import(
+            project_root=args.project_root,
+            file=args.file,
+            merge_mode=args.merge_mode,
+            report_dir=args.report_dir,
+            cwd=Path.cwd(),
+        )
+        _emit_payload_or_summary(
+            command="glossary_import",
+            result=result,
+            output_format=args.output_format,
+            quiet=args.quiet,
+        )
+        if result.message:
+            print(result.message, file=sys.stderr)
+        return result.exit_code
+    if args.command_group == "glossary" and args.glossary_command == "list":
+        result = glossary_list(project_root=args.project_root, locale=args.locale, query=args.query, cwd=Path.cwd())
+        if args.output_format == "json":
+            _emit_payload_or_summary(
+                command="glossary_list",
+                result=result,
+                output_format=args.output_format,
+                quiet=args.quiet,
+            )
+        elif not args.quiet:
+            _emit_glossary_table(result)
+        if result.message:
+            print(result.message, file=sys.stderr)
+        return result.exit_code
+    if args.command_group == "glossary" and args.glossary_command == "validate":
+        result = glossary_validate(project_root=args.project_root, report_dir=args.report_dir, cwd=Path.cwd())
+        _emit_payload_or_summary(
+            command="glossary_validate",
+            result=result,
+            output_format=args.output_format,
+            quiet=args.quiet,
+        )
+        if result.message:
+            print(result.message, file=sys.stderr)
+        return result.exit_code
+    if args.command_group == "glossary" and args.glossary_command == "suggest":
+        result = glossary_suggest_from_tm(
+            project_root=args.project_root,
+            target_locale=args.target_locale,
+            report_dir=args.report_dir,
+            cwd=Path.cwd(),
+        )
+        _emit_payload_or_summary(
+            command="glossary_suggest",
+            result=result,
+            output_format=args.output_format,
+            quiet=args.quiet,
+        )
+        if result.message:
+            print(result.message, file=sys.stderr)
+        return result.exit_code
     parser.print_help(sys.stderr)
     return EXIT_USAGE_OR_SCHEMA
 
@@ -349,6 +428,32 @@ def _emit_locale_reference_table(result) -> None:
         print("No locale suggestions matched.")
         return
     columns = ["language", "locale", "stored_locale", "ios_lproj", "android_values"]
+    widths = {
+        column: max(len(column), *(len(str(row.get(column, ""))) for row in rows))
+        for column in columns
+    }
+    header = "  ".join(column.ljust(widths[column]) for column in columns)
+    print(header)
+    print("  ".join("-" * widths[column] for column in columns))
+    for row in rows:
+        print("  ".join(str(row.get(column, "")).ljust(widths[column]) for column in columns))
+
+
+def _emit_glossary_table(result) -> None:
+    if result.payload is None:
+        _emit_summary(
+            command="glossary_list",
+            exit_code=result.exit_code,
+            reports=result.reports,
+            output_format="text",
+            quiet=False,
+        )
+        return
+    rows = result.payload.get("terms", [])
+    if not rows:
+        print("No glossary terms.")
+        return
+    columns = ["id", "source", "target_locale", "target", "status", "protected", "untranslated", "forbidden"]
     widths = {
         column: max(len(column), *(len(str(row.get(column, ""))) for row in rows))
         for column in columns

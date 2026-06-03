@@ -14,6 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from parley.cli import main
+from parley.serialization import yaml_load
 from helpers import run_cli, stable_run_env
 
 
@@ -62,6 +63,8 @@ class ProjectInitTests(unittest.TestCase):
             self.assertIn('bye:', context_anchor)
             self.assertIn('hello:', context_anchor)
             self.assertIn('context: ""', context_anchor)
+            glossary = yaml_load((root / "glossary.yaml").read_text(encoding="utf-8"))
+            self.assertEqual(glossary["terms"], [])
             self.assertTrue((root / "reports" / "validation" / _expected_report_name()).exists())
             with sqlite3.connect(root / "translation-memory.sqlite") as conn:
                 schema_version = conn.execute(

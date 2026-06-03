@@ -5,6 +5,7 @@ from pathlib import Path
 from parley.artifacts import load_project_artifacts, read_yaml_artifact, resolve_project_root, schema_issues_for_required
 from parley.atomic import commit_files
 from parley.errors import EXIT_BLOCKING_FINDINGS, EXIT_IO_OR_PARSER, EXIT_OK, EXIT_USAGE_OR_SCHEMA, FileIOError, ParleyError, UsageError
+from parley.glossary_terms import terminology_findings
 from parley.hashing import sha256_canonical_json, sha256_text
 from parley.parsers import infer_format, parse_localization
 from parley.paths import canonical_relative_path, resolve_report_dir
@@ -138,10 +139,12 @@ def localization_add(
             )
             files[root / "parley.yaml"] = yaml_dump(manifest).encode("utf-8")
             files[root / "canonical-inventory.json"] = pretty_json(canonical).encode("utf-8")
-        structural_findings = _structural_findings(rel_path, inventory["localizations"][-1] if False else next(record for record in inventory["localizations"] if record["localization_id"] == effective_id), parsed, canonical)
+        effective_record = next(record for record in inventory["localizations"] if record["localization_id"] == effective_id)
+        structural_findings = _structural_findings(rel_path, effective_record, parsed, canonical)
+        structural_findings.extend(_terminology_findings(rel_path, effective_record, parsed, canonical, artifacts.glossary))
         findings.extend(structural_findings)
-        exit_code = EXIT_BLOCKING_FINDINGS if findings else EXIT_OK
-        report = _validation_report(root, report_root, started_at, exit_code, findings, [_validated(next(record for record in inventory["localizations"] if record["localization_id"] == effective_id), "validated")])
+        exit_code = EXIT_BLOCKING_FINDINGS if any(item.get("severity") == "blocking" for item in findings) else EXIT_OK
+        report = _validation_report(root, report_root, started_at, exit_code, findings, [_validated(effective_record, "validated")])
         commit_files(root, files, {report.path: report.content})
         return CommandResult(exit_code, [report.path])
     except ParleyError as exc:
@@ -259,6 +262,29 @@ def _structural_findings(path: str, record: dict, parsed, canonical: dict | None
             findings.append(_finding(path, "placeholder_mismatch", f"placeholder mismatch for key: {key}", "placeholder_integrity", "placeholder_mismatch", record, key))
     for key in sorted(set(parsed_by_key) - set(canonical_entries)):
         findings.append(_finding(path, "extra_key", f"extra key: {key}", "placeholder_integrity", "extra_key", record, key))
+    return findings
+
+
+def _terminology_findings(path: str, record: dict, parsed, canonical: dict | None, glossary: dict | None) -> list[dict]:
+    if not canonical:
+        return []
+    findings = []
+    parsed_by_key = {entry.key: entry for entry in parsed.entries}
+    for key in sorted(canonical["entries"]):
+        parsed_entry = parsed_by_key.get(key)
+        if parsed_entry is None:
+            continue
+        findings.extend(
+            terminology_findings(
+                glossary,
+                key=key,
+                path=path,
+                locale=record["locale"],
+                source_text=canonical["entries"][key]["authoritative_value"],
+                target_text=parsed_entry.value,
+                source_locale=canonical["authoritative_locale"],
+            )
+        )
     return findings
 
 

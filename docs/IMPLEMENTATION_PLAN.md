@@ -83,7 +83,7 @@ Scope:
   - `translation-memory.sqlite`
   - `reports/`
   - Create a schema-valid context anchor with blank per-key context slots without provider calls.
-- Create an empty glossary placeholder with `rules: []`.
+- Create an empty glossary placeholder with `terms: []` once glossary support is implemented; legacy `rules: []` may be accepted only as a migration aid.
 - Initialize translation memory as an empty SQLite database or minimal placeholder consistent with the Translation Memory spec once its minimum DB contract is confirmed.
 - Write an initialization report through the shared report writer.
 - Implement `--force` as an atomic replacement path for managed artifacts.
@@ -133,7 +133,7 @@ Exit criteria:
 
 - `parley validate` can classify project artifact presence and schema validity.
 - Missing or schema-invalid required artifacts produce deterministic exit behavior and reports.
-- Optional missing `glossary.yaml` behaves as an empty ruleset.
+- Optional missing `glossary.yaml` behaves as an empty terms list.
 
 Implemented notes:
 

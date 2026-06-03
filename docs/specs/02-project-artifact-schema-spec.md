@@ -28,7 +28,7 @@ The MVP artifact set is intentionally small. Each artifact has one authoritative
 | Translation memory | SQLite | `<project-root>/translation-memory.sqlite` | Translation Memory Service | Translation Memory Service | Translation Memory Specification |
 | Reports | JSON | `<project-root>/reports/<report-family>/` | Report Writer invoked by Project Service | Report Writer | This spec + command specs + Validation and Error Taxonomy Specification |
 
-Requiredness model note (MVP): `parley.yaml` MUST include the `artifacts.glossary` manifest pointer, but the `glossary.yaml` file itself MAY be absent. If `glossary.yaml` is absent, glossary evaluation behaves as if an empty ruleset is present; if it is present, it MUST be schema-valid.
+Requiredness model note (MVP): `parley.yaml` MUST include the `artifacts.glossary` manifest pointer, but the `glossary.yaml` file itself MAY be absent. If `glossary.yaml` is absent, glossary evaluation behaves as if an empty terms list is present; if it is present, it MUST be schema-valid.
 
 The Project Artifact Schema Specification owns the enclosing schema and placement of these artifacts. It does not own:
 
@@ -46,7 +46,7 @@ The Project Artifact Schema Specification owns the enclosing schema and placemen
 | `Timestamp` | UTC RFC 3339 timestamp. Unless a leaf command spec states otherwise, timestamps persisted by artifacts and report envelopes defined in this spec MUST be serialized as whole-second UTC RFC 3339 with an explicit `Z` suffix. If a command spec requires a different precision, it MUST still be UTC RFC 3339 and MUST be deterministic. |
 | `Hash` | Lowercase SHA-256 hex digest. |
 | `RelativePath` | Canonical project-root-relative path string. Absolute paths MUST NOT be stored in project artifacts or completed reports. |
-| `ReportFamily` | One of `initialization`, `validation`, `confidence`, `translation`, `comparison`, or `translation_memory`. |
+| `ReportFamily` | One of `initialization`, `validation`, `confidence`, `translation`, `comparison`, `glossary`, or `translation_memory`. |
 
 ### 3.1 RelativePath Normalization
 
@@ -288,11 +288,11 @@ Rules:
 
 ## 8. `glossary.yaml`
 
-`glossary.yaml` stores human-authored terminology rules. For the MVP, `glossary.yaml` is an optional project artifact; if absent, glossary evaluation behaves as if an empty ruleset is present.
+`glossary.yaml` stores human-authored terminology. For the MVP, glossary truth is bring-your-own by default: humans or existing organizational terminology sources own accepted terminology, and Parley applies, validates, lists, imports, and may suggest changes to that terminology. If `glossary.yaml` is absent, glossary evaluation behaves as if an empty terms list is present.
 
 Project initialization rules:
 
-- `parley project init` MAY create a schema-valid `glossary.yaml` placeholder with `rules: []`.
+- `parley project init` MAY create a schema-valid `glossary.yaml` placeholder with `terms: []`.
 - If `glossary.yaml` is missing, project validation MUST NOT fail due to glossary absence.
 - If `glossary.yaml` is present, it MUST be schema-valid.
 
@@ -303,21 +303,61 @@ Required top-level fields when present:
 | `schema_version` | string | MUST be `"1.0"`. |
 | `project_id` | `ID` | Project ID from `parley.yaml`. |
 | `glossary_version` | `ID` | Stable glossary version. |
-| `rules` | array | Glossary rules. MAY be empty. |
+| `terms` | array | Human-authored glossary terms. MAY be empty. |
 
-Glossary rule:
+Glossary term:
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| `id` | `ID` | yes | Rule ID. |
-| `term` | string | yes | Source term or phrase. |
-| `type` | enum | yes | `preferred`, `prohibited`, `protected`, `untranslated`, or `canonical`. |
-| `source_locale` | `Locale` | no | Locale for source term. |
-| `target_locale` | `Locale` or `*` | no | Target locale scope. |
-| `translation` | string | no | Required or preferred target text. |
+| `id` | `ID` | yes | Stable glossary term ID. |
+| `source` | string | yes | Source term or phrase. |
+| `source_locale` | `Locale` or `*` | no | Locale scope for the source term. Defaults to the project authoritative locale. |
+| `part_of_speech` | string | no | Human hint such as `noun`, `verb`, `adjective`, or domain-specific value. |
+| `notes` | string | no | Human notes used for review and provider context. |
 | `case_sensitive` | boolean | no | Defaults to `false`. |
-| `severity` | enum | no | Validation severity. When present, it MUST be one of `info`, `warning`, `error`, or `blocking`. Category/severity semantics are owned by the Validation and Error Taxonomy Specification. |
+| `protected` | boolean | no | When true, the source term is a protected/product term and MUST NOT be translated unless a locale target explicitly allows it. |
+| `untranslated` | boolean | no | When true, the source term SHOULD remain unchanged in target output. |
+| `targets` | object | no | Map from target locale or `*` to target term metadata. |
+| `forbidden` | object | no | Map from target locale or `*` to a list of prohibited target terms or phrases. |
+
+Target term metadata:
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `term` | string | yes | Preferred or required target term. |
+| `status` | enum | no | `draft`, `reviewed`, `approved`, or `locked`. Defaults to `draft`. |
+| `severity` | enum | no | Validation severity when this target term is violated. Defaults to `warning` for draft/reviewed and `error` for approved/locked unless policy overrides it. |
+| `case_sensitive` | boolean | no | Defaults to `false`. |
 | `notes` | string | no | Human notes. |
+
+Example:
+
+```yaml
+schema_version: "1.0"
+project_id: hidapprove
+glossary_version: product-2026-06
+terms:
+  - id: access-token
+    source: Access token
+    source_locale: en-us
+    part_of_speech: noun
+    notes: OAuth/security credential.
+    targets:
+      fr-fr:
+        term: jeton d'acces
+        status: approved
+        severity: error
+      de-de:
+        term: Zugriffstoken
+        status: approved
+    forbidden:
+      fr-fr:
+        - token d'acces
+  - id: hid-approve
+    source: HID Approve
+    protected: true
+    untranslated: true
+```
 
 Severity values (MVP):
 
@@ -326,7 +366,12 @@ Severity values (MVP):
 - `error`
 - `blocking`
 
-Rule evaluation order, terminology finding categories, and severity promotion are owned by the Validation and Error Taxonomy Specification unless a glossary-specific leaf spec is introduced.
+Constraint resolution order, terminology finding categories, and severity promotion are owned by the Validation and Error Taxonomy Specification unless a glossary-specific leaf spec is introduced.
+
+Legacy compatibility note:
+
+- Earlier pre-MVP drafts used a flat `rules: []` shape. Implementations MAY accept that shape during migration, but the canonical human-authored glossary shape is `terms: []`.
+- Parley-generated glossary suggestions MUST NOT become authoritative glossary terms automatically. Suggestion workflows MUST emit reports or draft entries that require explicit human import/promotion before affecting provider constraints, validation, or confidence.
 
 ## 9. MVP Report Placement and Envelope
 
@@ -344,6 +389,7 @@ Report placement:
   - `<resolved-report-dir>/confidence/`
   - `<resolved-report-dir>/translation/`
   - `<resolved-report-dir>/comparison/`
+  - `<resolved-report-dir>/glossary/`
   - `<resolved-report-dir>/translation_memory/`
 - Report file naming MUST be deterministic for an invocation:
   - The command MUST provide a `run_id` string in the report envelope.

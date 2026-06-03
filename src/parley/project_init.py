@@ -207,7 +207,7 @@ def _prepare_init(
         "schema_version": "1.0",
         "project_id": project_id,
         "glossary_version": "mvp",
-        "rules": [],
+        "terms": [],
     }
     report_root = resolve_report_dir(project_root, report_dir)
     report = prepare_report(

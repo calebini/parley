@@ -92,7 +92,11 @@ Canonical `check_id` values for default MVP conditions:
 | Placeholder type mismatch | `placeholder_type_mismatch` |
 | Invalid placeholder reorder | `placeholder_reorder_invalid` |
 | Glossary prohibited term used | `terminology_glossary_prohibited_term` |
+| Glossary preferred term missing | `terminology_glossary_preferred_term_missing` |
+| Glossary preferred term mistranslated | `terminology_glossary_preferred_term_mistranslated` |
 | Protected product name translated | `terminology_protected_product_name_translated` |
+| Glossary untranslated term translated | `terminology_untranslated_term_translated` |
+| Ambiguous multiple glossary matches | `terminology_ambiguous_glossary_match` |
 | Spelling issue | `spelling_issue` |
 | Grammar issue | `grammar_issue` |
 | Clarity issue | `clarity_issue` |
@@ -181,7 +185,11 @@ Provider warnings/errors are reportable findings when the required report can st
 | Placeholder type mismatch | `placeholder_integrity` | `blocking` |
 | Invalid placeholder reorder | `placeholder_integrity` | `error` |
 | Glossary prohibited term used | `terminology` | `error` |
+| Glossary preferred term missing | `terminology` | `warning` |
+| Glossary preferred term mistranslated | `terminology` | `error` |
 | Protected product name translated | `terminology` | `blocking` |
+| Glossary untranslated term translated | `terminology` | `error` |
+| Ambiguous multiple glossary matches | `terminology` | `warning` |
 | Spelling issue | `spelling` | `warning` |
 | Grammar issue | `grammar` | `warning` |
 | Clarity issue | `clarity` | `warning` |
@@ -274,7 +282,7 @@ Terminology violation:
   "id": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
   "category": "terminology",
   "severity": "error",
-  "check_id": "terminology_glossary_prohibited_term",
+  "check_id": "terminology_glossary_preferred_term_mistranslated",
   "locale": "fr-FR",
   "file": "fr.lproj/Localizable.strings",
   "key": "account_label",

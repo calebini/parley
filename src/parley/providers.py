@@ -15,6 +15,11 @@ class TranslationRequest:
     source_locale: str
     target_locale: str
     placeholder_signature: str
+    placeholder_tokens: list[dict[str, str]]
+    context_description: str | None = None
+    project_context: dict[str, Any] | None = None
+    glossary_constraints: list[dict[str, Any]] | None = None
+    translation_memory_candidates: list[dict[str, Any]] | None = None
 
 
 @dataclass(frozen=True)
@@ -126,10 +131,11 @@ def _translation_request_payload(*, provider_id: str, request: TranslationReques
         "target_locale": request.target_locale,
         "source_text": request.source_value,
         "protected_text": request.source_value,
-        "placeholder_tokens": [],
-        "context_description": None,
-        "glossary_constraints": [],
-        "translation_memory_candidates": [],
+        "placeholder_tokens": request.placeholder_tokens,
+        "context_description": request.context_description,
+        "project_context": request.project_context or {},
+        "glossary_constraints": request.glossary_constraints or [],
+        "translation_memory_candidates": request.translation_memory_candidates or [],
     }
     request_id = "parley_" + sha256_canonical_json(
         {
@@ -147,7 +153,7 @@ def _translation_request_payload(*, provider_id: str, request: TranslationReques
         "provider_id": provider_id,
         "source_locale": request.source_locale,
         "target_locale": request.target_locale,
-        "project_context": {},
+        "project_context": request.project_context or {},
         "entries": [entry],
     }
 

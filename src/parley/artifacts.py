@@ -7,6 +7,7 @@ import sqlite3
 from typing import Any
 
 from parley.errors import UsageError
+from parley.glossary_terms import validate_glossary_artifact
 from parley.serialization import yaml_load
 
 
@@ -204,8 +205,7 @@ def _validate_yaml_artifact(artifact: str, data: dict[str, Any]) -> None:
         if not data.get("project_id") or not data.get("authoritative_locale") or not isinstance(data.get("entries"), dict):
             raise UsageError("invalid context-anchor.yaml", failure_category="artifact_schema")
     elif artifact == "glossary.yaml":
-        if not data.get("project_id") or not data.get("glossary_version") or not isinstance(data.get("rules"), list):
-            raise UsageError("invalid glossary.yaml", failure_category="artifact_schema")
+        validate_glossary_artifact(data)
 
 
 def _validate_json_artifact(artifact: str, data: dict[str, Any]) -> None:

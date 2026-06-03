@@ -550,6 +550,88 @@ class TranslateTests(unittest.TestCase):
             self.assertEqual(payload["summary"]["provider_id"], "command-json")
             self.assertEqual([item["outcome"] for item in payload["per_key_outcomes"]], ["generated", "generated"])
 
+    def test_translate_provider_receives_glossary_constraints(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            init_project(root, source_text='"token" = "Access token";\n')
+            _populate_context_anchor(root)
+            _add_empty_target(root)
+            _write_glossary(root)
+            provider = _fake_provider_script(
+                root,
+                """
+                import json
+                import sys
+                request = json.loads(sys.stdin.read())
+                constraints = request["entries"][0]["glossary_constraints"]
+                assert constraints[0]["source"] == "Access token"
+                assert constraints[0]["preferred"] == "jeton d'acces"
+                entries = [{
+                    "key": request["entries"][0]["key"],
+                    "status": "translated",
+                    "translated_text": "jeton d'acces",
+                    "failure_reason": None,
+                }]
+                print(json.dumps({
+                    "schema_version": "1.0",
+                    "request_id": request["request_id"],
+                    "provider_id": request["provider_id"],
+                    "status": "ok",
+                    "entries": entries,
+                    "provider_metadata": None,
+                }))
+                """,
+            )
+
+            with stable_run_env("2026-05-16T02:10:00.000000Z", "7" * 32):
+                code = run_cli(
+                    [
+                        "translate",
+                        "--project-root",
+                        str(root),
+                        "--target-locale",
+                        "fr-FR",
+                        "--reuse-mode",
+                        "provider_only",
+                        "--provider",
+                        "command-json",
+                        "--provider-command",
+                        str(provider),
+                    ]
+                )
+
+            self.assertEqual(code, 0)
+            self.assertEqual((root / "fr.lproj" / "Localizable.strings").read_text(encoding="utf-8"), '"token" = "jeton d\'acces";\n')
+
+    def test_translate_reports_glossary_findings_on_staged_output(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            init_project(root, source_text='"token" = "Access token";\n')
+            _populate_context_anchor(root)
+            _add_empty_target(root)
+            _write_glossary(root)
+
+            with stable_run_env("2026-05-16T02:20:00.000000Z", "8" * 32):
+                code = run_cli(
+                    [
+                        "translate",
+                        "--project-root",
+                        str(root),
+                        "--target-locale",
+                        "fr-FR",
+                        "--reuse-mode",
+                        "provider_only",
+                        "--provider",
+                        "dummy",
+                    ]
+                )
+
+            self.assertEqual(code, 0)
+            report = root / "reports" / "translation" / "translate--20260516T022000000000Z-88888888888888888888888888888888.json"
+            payload = json.loads(report.read_text(encoding="utf-8"))
+            self.assertEqual(payload["validation_findings"][0]["code"], "terminology_glossary_preferred_term_mistranslated")
+            self.assertEqual(payload["validation_findings"][0]["category"], "terminology")
+
     def test_translate_named_provider_config_generates_with_fake_cli(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -964,6 +1046,26 @@ def _add_empty_target(root: Path) -> Path:
     if code != 1:
         raise AssertionError(f"expected empty target add to report blocking findings, got {code}")
     return target
+
+
+def _write_glossary(root: Path) -> None:
+    (root / "glossary.yaml").write_text(
+        yaml_dump(
+            {
+                "schema_version": "1.0",
+                "project_id": "myapp",
+                "glossary_version": "product-1",
+                "terms": [
+                    {
+                        "id": "access-token",
+                        "source": "Access token",
+                        "targets": {"fr-fr": {"term": "jeton d'acces", "status": "approved"}},
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
 
 
 def _insert_tm_record(

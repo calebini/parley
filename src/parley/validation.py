@@ -5,6 +5,7 @@ from pathlib import Path
 
 from parley.artifacts import inspect_artifacts, load_project_artifacts, resolve_project_root, schema_issues_for_required
 from parley.errors import EXIT_BLOCKING_FINDINGS, EXIT_IO_OR_PARSER, EXIT_OK, EXIT_USAGE_OR_SCHEMA, FileIOError, ParleyError, UsageError
+from parley.glossary_terms import terminology_findings
 from parley.parsers import parse_localization
 from parley.paths import resolve_report_dir
 from parley.reports import prepare_report, utc_now
@@ -112,6 +113,21 @@ def validate_project(
                     findings.append(_finding(record["path"], "placeholder_mismatch", f"placeholder mismatch for key: {key}", "placeholder_integrity", "placeholder_mismatch", record, key))
             for key in sorted(set(parsed_by_key) - set(canonical_entries)):
                 findings.append(_finding(record["path"], "extra_key", f"extra key: {key}", "placeholder_integrity", "extra_key", record, key))
+            for key in sorted(canonical_entries):
+                parsed_entry = parsed_by_key.get(key)
+                if parsed_entry is None:
+                    continue
+                findings.extend(
+                    terminology_findings(
+                        artifacts.glossary,
+                        key=key,
+                        path=record["path"],
+                        locale=record["locale"],
+                        source_text=canonical_entries[key]["authoritative_value"],
+                        target_text=parsed_entry.value,
+                        source_locale=canonical["authoritative_locale"],
+                    )
+                )
 
     if exit_code == EXIT_OK and any(item.get("severity") == "blocking" for item in findings):
         exit_code = EXIT_BLOCKING_FINDINGS

@@ -4,7 +4,7 @@
 
 Parley is a CLI-based localization and translation management tool for translating, validating, comparing, and maintaining localization artifacts across a structured project lifecycle.
 
-The primary design goal is to preserve contextual translation quality over time. Parley's MVP workflow is project-oriented: a project captures the authoritative localization, context anchors, localization inventory, canonical key inventory, glossary rules, translation memory, validation reports, and confidence metadata needed to make localization repeatable and semantically consistent. Direct file-to-file translation is a post-MVP convenience workflow.
+The primary design goal is to preserve contextual translation quality over time. Parley's MVP workflow is project-oriented: a project captures the authoritative localization, context anchors, localization inventory, canonical key inventory, glossary terms, translation memory, validation reports, and confidence metadata needed to make localization repeatable and semantically consistent. Direct file-to-file translation is a post-MVP convenience workflow.
 
 ## 2. Design Principles
 
@@ -50,7 +50,7 @@ Recommended model families:
 - Context anchors.
 - Confidence reports.
 - Validation reports.
-- Glossary rules.
+- Glossary terms.
 - Translation memory records.
 
 ### 3.4 Artifact Formats
@@ -437,12 +437,13 @@ Supported placeholder classes:
 
 Responsibilities:
 
-- Load and validate the human-authored project glossary rules (`glossary.yaml`).
-- Apply preferred, prohibited, protected, untranslated, and canonical terminology rules.
+- Load and validate the human-authored project glossary terms (`glossary.yaml`).
+- Apply preferred, prohibited, protected, untranslated, and canonical terminology constraints resolved from those terms.
 - Provide terminology hints during translation generation.
 - Emit terminology violations as a distinct validation category (`terminology`).
+- Produce draft glossary suggestions when requested, without mutating accepted glossary truth unless an explicit glossary import/promotion command is invoked.
 
-If `glossary.yaml` is absent, the Glossary Engine should behave as if an empty ruleset is present.
+If `glossary.yaml` is absent, the Glossary Engine should behave as if an empty terms list is present.
 
 For determinism, glossary application should be stable and documented (rule evaluation and precedence should not depend on input ordering). Exact rule schema and precedence are owned by the leaf specs; the HLD only requires the behavior to be deterministic.
 
@@ -497,7 +498,7 @@ This table defines the authoritative producer and mutation boundary for MVP arti
 | `inventory.yaml` (localization inventory) | Inventory Service | Inventory Service | Project Service; CLI; Validation/Compare/Translate workflows | `<project-root>/inventory.yaml` | Project Artifact Schema Specification |
 | `canonical-inventory.json` (canonical keys baseline) | Canonical Inventory Service | Canonical Inventory Service | Inventory/Validation/Comparison/Translation workflows | `<project-root>/canonical-inventory.json` | Project Artifact Schema Specification |
 | `context-anchor.yaml` (project + per-key context) | Context Anchor Service | Context Anchor Service; human review flow (via CLI) | Confidence Engine; Translation Generation Engine; humans | `<project-root>/context-anchor.yaml` | Project Artifact Schema Specification + Confidence Model Specification |
-| `glossary.yaml` (terminology rules) | Humans (authoring workflow) | Humans (via editor or explicit `parley glossary` commands) | Validation Engine; Translation Generation Engine; Confidence Engine (terminology dimension) | `<project-root>/glossary.yaml` | Project Artifact Schema Specification + Validation and Error Taxonomy Specification |
+| `glossary.yaml` (terminology terms) | Humans (authoring workflow) | Humans (via editor or explicit `parley glossary` commands) | Validation Engine; Translation Generation Engine; Confidence Engine (terminology dimension) | `<project-root>/glossary.yaml` | Project Artifact Schema Specification + Validation and Error Taxonomy Specification |
 | Translation memory store | Translation Memory Service | Translation Memory Service; human approval workflow (via CLI) | Translation Generation Engine; CLI inspection | `<project-root>/translation-memory.sqlite` | Translation Memory Specification |
 | Reports (`reports/**/*.json`) | Report Writer (invoked by Project Service) | Report Writer | Humans; CI; downstream tooling | `<project-root>/reports/` | Project Artifact Schema Specification + Validation and Error Taxonomy Specification |
 | Run history + cache metadata | Project Service | Project Service | CLI; debugging; incremental decisions | `<project-root>/.parley/run-history/` and `<project-root>/.parley/cache/` | CLI Command Specification (behavior) + Project Artifact Schema Specification (if persisted shape is standardized) |

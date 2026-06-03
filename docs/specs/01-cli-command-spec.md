@@ -61,7 +61,7 @@ Report-writing command terminal output contract (MVP):
   "command": "<canonical_command>",
   "exit_code": 0,
   "reports": [
-    {"kind": "validation|confidence|translation|other", "path": "<absolute-or-project-root-relative-path>"}
+    {"kind": "validation|confidence|translation|glossary|other", "path": "<absolute-or-project-root-relative-path>"}
   ]
 }
 ```
@@ -171,7 +171,14 @@ Canonical command names (MVP):
 | `parley project init` | `project_init` |
 | `parley project inspect` | `project_inspect` |
 | `parley localization add` | `localization_add` |
+| `parley localization list` | `localization_list` |
+| `parley locale list` | `locale_list` |
+| `parley glossary import` | `glossary_import` |
+| `parley glossary list` | `glossary_list` |
+| `parley glossary validate` | `glossary_validate` |
+| `parley glossary suggest` | `glossary_suggest` |
 | `parley validate` | `validate` |
+| `parley tm import-target` | `tm_import_target` |
 | `parley translate` | `translate` |
 
 Minimal report envelope (MVP):
@@ -623,6 +630,28 @@ Behavior (MVP):
 - JSON output MUST include a `localizations` array with those fields.
 - The command MUST NOT write reports or mutate project artifacts.
 
+### 6.3 Glossary Commands
+
+Glossary commands manage the human-authored terminology artifact. Glossary truth is bring-your-own by default; Parley MAY suggest glossary candidates, but suggestions MUST NOT become authoritative without explicit import or promotion.
+
+```text
+parley glossary import --file PATH [--merge-mode replace|merge]
+parley glossary list [--locale LOCALE] [--query QUERY]
+parley glossary validate
+parley glossary suggest --from-tm [--target-locale LOCALE]
+```
+
+Behavior (MVP):
+
+- `parley glossary import` MUST read a `glossary.yaml`-compatible terms file and write the project glossary artifact.
+  - `--merge-mode replace` replaces the existing `terms` array after validation.
+  - `--merge-mode merge` merges by stable term `id` and MUST fail with exit code `2` on conflicting IDs unless a future force option defines conflict behavior.
+- `parley glossary list` MUST print glossary terms and per-locale target terms. If `--locale` is supplied, it MUST include global terms and terms whose target metadata applies to that locale. If `--query` is supplied, it MUST filter by source term, target term, notes, locale, and ID.
+- `parley glossary validate` MUST validate `glossary.yaml` schema and deterministic glossary consistency rules without mutating the artifact.
+- `parley glossary suggest --from-tm` MAY inspect translation memory and localization files to produce candidate glossary entries, but MUST write suggestions as a report or explicit draft artifact. It MUST NOT mutate `glossary.yaml` unless a separate explicit import/promotion command is invoked.
+- Missing `glossary.yaml` MUST be treated as an empty glossary for list/validate/translate unless the invoked glossary command explicitly requires an existing physical glossary file.
+- The canonical glossary artifact shape is the term-centric `terms: []` shape defined by the Project Artifact Schema Specification. Implementations MAY accept legacy flat `rules: []` files only as a migration aid.
+
 ## 7. Validation Commands
 
 ### 7.1 `parley validate`
@@ -763,7 +792,7 @@ Preconditions (MVP):
 - Unless `--no-context` is set, the command MUST also read and schema-validate `context-anchor.yaml`.
   - If any required artifact is missing or schema-invalid, the command MUST fail with exit code `2`.
 - The command MUST attempt to read and schema-validate `glossary.yaml`.
-  - If `glossary.yaml` is missing, the command MUST behave as if an empty ruleset is present (no terminology constraints).
+  - If `glossary.yaml` is missing, the command MUST behave as if an empty terms list is present (no terminology constraints).
   - If `glossary.yaml` is present but schema-invalid, the command MUST fail with exit code `2`.
 - The command MUST load the canonical key list/order from validated `canonical-inventory.json`; this order is the canonical-key order used for per-key evaluation and report writing.
 - The command MUST resolve the authoritative inventory entry.
@@ -782,7 +811,7 @@ Localization format resolution for translate (MVP):
   - A context anchor that is schema-valid but effectively empty or unpopulated for translation MUST be treated as an error.
   - For MVP determinism, “populated per-key context” means: for every canonical key present in validated `canonical-inventory.json`, the context anchor MUST provide a non-empty (after trimming whitespace) context value for that key.
   - If this requirement is not met, the command MUST fail fast with exit code `2` and MUST NOT perform any provider calls or stage any managed-artifact mutations.
-- If `--no-context` is set, missing, schema-invalid, or unpopulated `context-anchor.yaml` MUST NOT prevent translation. The command MUST omit context-anchor validation and MUST record this operator choice in the translation report inputs and summary.
+- If `--no-context` is set, missing, schema-invalid, or unpopulated `context-anchor.yaml` MUST NOT prevent translation. The command MUST omit context-anchor validation and MUST record this operator choice in the translation report inputs and summary. Glossary loading and enforcement remain enabled when `--no-context` is set.
 - The command MUST resolve exactly one target inventory entry for the normalized `--target-locale` deterministically.
   - The candidate set is all inventory entries with `role=target` whose `locale` equals the normalized `--target-locale`.
   - If the candidate set is empty and `--create-target` is omitted, the command MUST fail with exit code `2`.
@@ -803,7 +832,7 @@ Translation report eligibility (MVP):
   - Resolved `<project-root>`.
   - Schema-validated `parley.yaml`, `inventory.yaml`, `canonical-inventory.json`, and `translation-memory.sqlite`.
   - Schema-validated `context-anchor.yaml`, unless `--no-context` is set.
-  - Loaded glossary rules from `glossary.yaml` (or treated it as an empty ruleset when missing).
+  - Loaded glossary terms from `glossary.yaml` (or treated it as an empty terms list when missing).
   - Resolved the authoritative inventory entry.
   - Resolved the target inventory entry (including validating `--target-path` match when provided).
 - If the command fails with exit code `2` before reaching this eligibility point due to missing/schema-invalid artifacts, missing authoritative entry, target entry resolution failure (including `--target-path` mismatch), or context anchor precondition failure, the command MUST NOT write any translation report.
@@ -858,7 +887,7 @@ Canonical key decision ladder (MVP):
   - If the target localization file is missing, the command MUST treat every canonical key as having no existing target value; this is not by itself a failure.
   - If the target localization file exists but lacks a value for a canonical key, that key has no existing target value; this is not by itself a failure.
   - If translation memory has two or more records marked `is_current=true` for the key's conflict identity, translation memory is invalid; the command MUST fail with exit code `2` before provider calls or write-back and MUST write a translation report with `failure_category=tm_current_conflict`.
-- For each canonical key after input classification, the command MUST choose the first matching path below and MUST NOT evaluate later paths for that key. When glossary rules are present, provider-backed generation MUST apply the glossary terminology constraints for the target locale (and MUST treat provider output that violates blocking glossary constraints as `invalid_output` provider failure for that key):
+- For each canonical key after input classification, the command MUST choose the first matching path below and MUST NOT evaluate later paths for that key. When glossary terms are present, provider-backed generation MUST apply resolved glossary terminology constraints for the target locale (and MUST treat provider output that violates blocking glossary constraints as `invalid_output` provider failure for that key):
   1. `skipped` with report category `unchanged`: an existing target value is present, the selected current translation-memory record has `last_translated_source_hash` equal to the current authoritative `content_hash`, and that record's `target_value` exactly equals the existing target value.
   2. `skipped` with report category `human_status_preserved`: the selected current translation-memory record has `human_status` of `locked` or `approved`, and that record's `target_value` exactly equals the existing target value.
   3. `failed` with report category `target_tm_conflict`: the selected current translation-memory record has `human_status` of `locked` or `approved`, but the existing target value is missing or differs from that record's `target_value`.
