@@ -36,12 +36,15 @@ Parley currently supports a local MVP workflow:
 - Parse, validate, translate, and reuse iOS `.strings` files in an end-to-end demo flow.
 - Parse, validate, translate, and reuse Android XML string resources in an end-to-end demo flow.
 - Add target localizations to project inventory.
+- List registered locale/file mappings.
+- List common locale-code suggestions with iOS and Android path hints.
+- Import existing target localizations into translation memory.
 - Validate targets against the canonical source:
   - missing keys
   - extra keys
   - placeholder mismatches
   - parser and IO failures
-- Seed placeholder context for local MVP dry runs.
+- Scaffold blank per-key context entries during project initialization.
 - Translate via a deterministic local `dummy` provider.
 - Reuse translations from SQLite translation memory.
 - Write target localization files atomically.
@@ -55,8 +58,9 @@ Parley’s happy path looks like this:
 
 ```text
 project init
-  -> context seed
+  -> fill context-anchor.yaml
   -> localization add
+  -> tm import-target
   -> translate
   -> validate
   -> translate again with TM reuse
@@ -97,13 +101,9 @@ PYTHONPATH=src python3 -m parley project init \
   --locale en-US
 ```
 
-Seed placeholder context:
+Context:
 
-```sh
-PYTHONPATH=src python3 -m parley context seed \
-  --project-root "$WORKDIR" \
-  --mode placeholder
-```
+`project init` scaffolds `context-anchor.yaml` with one blank context entry for every canonical key. For production translation, replace those blank values with real product/context descriptions. This synthetic quick start uses `--no-context` below to exercise the literal/dummy-provider path without pretending blank context is meaningful.
 
 Create and add an empty French target:
 
@@ -119,6 +119,17 @@ PYTHONPATH=src python3 -m parley localization add \
 
 The empty target should report blocking validation findings. That is expected; translation fills it next.
 
+For existing, stable target localizations, import their current values into translation memory before relying on TM reuse:
+
+```sh
+PYTHONPATH=src python3 -m parley tm import-target \
+  --project-root "$WORKDIR" \
+  --target-locale fr-FR \
+  --status reviewed
+```
+
+The import leaves target localization files unchanged. It writes reusable `imported` translation-memory records for keys whose target values exist and match the authoritative placeholder signatures.
+
 Run deterministic local translation:
 
 ```sh
@@ -126,8 +137,24 @@ PYTHONPATH=src python3 -m parley translate \
   --project-root "$WORKDIR" \
   --target-locale fr-FR \
   --reuse-mode provider_only \
-  --provider dummy
+  --provider dummy \
+  --no-context
 ```
+
+For a new target locale that is not registered yet, translate can create and register the target when given an explicit path:
+
+```sh
+PYTHONPATH=src python3 -m parley translate \
+  --project-root "$WORKDIR" \
+  --target-locale de-DE \
+  --target-path "$WORKDIR/de.lproj/Localizable.strings" \
+  --create-target \
+  --reuse-mode provider_only \
+  --provider dummy \
+  --no-context
+```
+
+Add `--dry-run` to preview the creation/registration intent without writing the target file, inventory, or translation memory.
 
 Validate the generated target:
 
@@ -210,7 +237,9 @@ The MVP intentionally centers project mode. Direct file-to-file translation is d
 
 ### Context is an artifact
 
-Parley treats context as something worth storing and reviewing. The current `context seed` command creates placeholder context for local dry runs; future provider-backed context generation can fill the same artifact with richer data.
+Parley treats context as something worth storing and reviewing. `project init` creates blank per-key context slots in `context-anchor.yaml`; humans or future provider-backed context generation should fill those slots with meaningful descriptions before translation.
+
+When context is unavailable or inappropriate for a literal pass, `parley translate --no-context` bypasses the populated-context precondition and records `context_mode: disabled` in the translation report.
 
 ### Translation memory is a quality asset
 
@@ -256,8 +285,10 @@ Inspect the CLI:
 
 ```sh
 PYTHONPATH=src python3 -m parley --help
+PYTHONPATH=src python3 -m parley locale list --query german
+PYTHONPATH=src python3 -m parley localization list --help
 PYTHONPATH=src python3 -m parley translate --help
-PYTHONPATH=src python3 -m parley context seed --help
+PYTHONPATH=src python3 -m parley tm import-target --help
 ```
 
 ## Status

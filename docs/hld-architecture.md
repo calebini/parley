@@ -643,7 +643,7 @@ Flow:
 8. Write target localization through the parser adapter.
 9. Update translation memory and reports.
 
-Project-mode translation requires `context-anchor.yaml` to exist and validate. For MVP, `parley project init` writes a schema-valid empty anchor (no provider calls), while `parley context generate` (or an equivalent review/import flow) is responsible for populating it.
+Project-mode translation requires `context-anchor.yaml` to exist and validate. For MVP, `parley project init` writes a schema-valid anchor with blank per-key context slots (no provider calls), while `parley context generate` (or an equivalent review/import flow) is responsible for populating it.
 
 A schema-valid but effectively empty/unpopulated anchor (the placeholder written by `parley project init`) is not sufficient for context-aware translation: treat it as a precondition failure and fail fast before any provider calls. If the context anchor is missing, invalid, or unpopulated, translation should fail fast before any provider calls.
 
@@ -904,7 +904,7 @@ My opinion: the first three specs are essential before writing much production c
 
 The HLD is architecturally “done enough” for MVP implementation when the following observable checks hold:
 
-- **Project init artifacts:** `parley project init` produces `parley.yaml`, `inventory.yaml`, `canonical-inventory.json`, and a schema-valid empty `context-anchor.yaml` placeholder, plus an initialization report.
+- **Project init artifacts:** `parley project init` produces `parley.yaml`, `inventory.yaml`, `canonical-inventory.json`, and a schema-valid `context-anchor.yaml` with blank per-key context slots, plus an initialization report.
 - **Add-localization artifacts:** `parley localization add` (project mode) always emits a validation report, and also emits a confidence report whose mode and provider-skipped behavior follows the rules in 8.2 (no silent ambiguity between standalone vs relative-to-anchor).
 - **Authority completeness:** Every artifact family listed in 7.15 has a named authoritative producer, allowed mutators, persistence location, and leaf-spec owner for detailed contracts.
 - **Workflow completeness:** Every workflow in section 8 names its terminal outputs (artifacts/reports) and at least one obvious failure category (e.g., parser/IO, artifact schema invalid, provider required/unavailable, blocking validation findings).

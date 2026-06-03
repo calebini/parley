@@ -248,7 +248,7 @@ Timestamp mutation semantics (MVP):
 
 ## 7. `context-anchor.yaml`
 
-`context-anchor.yaml` stores project-level and per-key context. It may be created by `parley project init` as a schema-valid empty placeholder without provider calls.
+`context-anchor.yaml` stores project-level and per-key context. It may be created by `parley project init` with blank per-key context slots and no provider calls.
 
 Required top-level fields:
 
@@ -258,7 +258,7 @@ Required top-level fields:
 | `project_id` | `ID` | Project ID from `parley.yaml`. |
 | `authoritative_locale` | `Locale` | Source locale used for context. |
 | `project_context.description` | string | Project-level context. MAY be empty when created by `parley project init`. |
-| `entries` | object | Map from localization key to context entry. MAY be empty for the initial placeholder. |
+| `entries` | object | Map from localization key to context entry. MAY contain blank scaffold entries created during initialization. |
 
 Optional project context fields:
 
@@ -281,7 +281,7 @@ Context entry:
 
 Rules:
 
-- A schema-valid empty context anchor is acceptable for project initialization and some confidence workflows.
+- A schema-valid context anchor with blank scaffold entries is acceptable for project initialization and some confidence workflows.
 - Project-mode translation requires populated per-key context as defined by the CLI Command Specification; this spec only defines how the context is stored.
 - Confidence dimensions, score meanings, and confidence report behavior are owned by the Confidence Model Specification.
 - `updated_at` is a mutation timestamp, not a regeneration timestamp: it MUST be updated only when the context entry's stored content changes. Pure reserialization, reordering, or an identical rewrite MUST NOT bump `updated_at`.

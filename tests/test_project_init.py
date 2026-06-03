@@ -58,6 +58,10 @@ class ProjectInitTests(unittest.TestCase):
             self.assertEqual(list(canonical["entries"]), ["bye", "hello"])
             self.assertEqual(canonical["authoritative_locale"], "en-us")
             self.assertEqual(canonical["entries"]["hello"]["placeholder_signature"], "%@")
+            context_anchor = (root / "context-anchor.yaml").read_text(encoding="utf-8")
+            self.assertIn('bye:', context_anchor)
+            self.assertIn('hello:', context_anchor)
+            self.assertIn('context: ""', context_anchor)
             self.assertTrue((root / "reports" / "validation" / _expected_report_name()).exists())
             with sqlite3.connect(root / "translation-memory.sqlite") as conn:
                 schema_version = conn.execute(

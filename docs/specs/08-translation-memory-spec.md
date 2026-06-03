@@ -88,7 +88,19 @@ Allowed `approval_status` values:
 
 `approval_status` uses the same semantic meaning as human status in project artifacts.
 
-## 5.1 Review and Confidence Expansion Point
+## 5.1 Importing Existing Target Localizations
+
+Existing target localization files may be imported into translation memory through `parley tm import-target`.
+
+Imported records:
+
+- MUST use `provenance=imported`.
+- MUST store the user-selected human status.
+- MUST become the current record for their `(project_id, key, source_locale, target_locale)` identity.
+- MUST store `source_content_hash` and `last_translated_source_hash` as the current authoritative canonical `content_hash`.
+- MUST NOT be created for missing target keys, extra target keys, or placeholder mismatches.
+
+## 5.2 Review and Confidence Expansion Point
 
 For the MVP, `provenance` and `approval_status` are the decision fields used by translation reuse ordering. `confidence_json` and `metadata_json` are reserved expansion fields and MAY remain `{}` for records written by MVP commands.
 

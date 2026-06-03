@@ -198,7 +198,10 @@ def _prepare_init(
         "project_id": project_id,
         "authoritative_locale": normalized_locale,
         "project_context": {"description": ""},
-        "entries": {},
+        "entries": {
+            key: {"context": ""}
+            for key in sorted(canonical_entries)
+        },
     }
     glossary = {
         "schema_version": "1.0",

@@ -234,7 +234,7 @@ Project-root and emptiness rules (MVP):
   - If `translation-memory.sqlite` already exists and `--force` is provided, the command MUST replace it with a newly created empty database.
   - If `.parley/` already exists and `--force` is provided, the command MUST preserve its existing contents; it MAY create additional required subdirectories/files under `.parley/` but MUST NOT delete or rewrite unrelated `.parley/` contents.
   - If `<project-root>/reports/` already exists and `--force` is provided, the command MUST preserve existing reports and MUST NOT delete or overwrite prior report files under `<project-root>/reports/`; it MUST only add a new initialization report under `<resolved --report-dir>/validation/` following the shared report naming rules.
-- With or without `--force`, the command MUST complete all input validation and all derivation work before deleting, replacing, or committing any managed artifact. This includes resolving `<project-root>`, canonicalizing and validating `--authoritative PATH`, determining parser format, reading/parsing the authoritative localization file, deriving the authoritative inventory record, deriving the canonical inventory, and preparing the schema-valid empty `context-anchor.yaml` placeholder, schema-valid empty `glossary.yaml` placeholder, the translation memory database, and the initialization report.
+- With or without `--force`, the command MUST complete all input validation and all derivation work before deleting, replacing, or committing any managed artifact. This includes resolving `<project-root>`, canonicalizing and validating `--authoritative PATH`, determining parser format, reading/parsing the authoritative localization file, deriving the authoritative inventory record, deriving the canonical inventory, preparing the schema-valid `context-anchor.yaml` with blank per-key context slots, preparing the schema-valid empty `glossary.yaml` placeholder, the translation memory database, and the initialization report.
 - For `--force`, delete/replace behavior is part of the final commit step only. If any validation, parse, derivation, staging, or report-preparation step fails before the commit point, the command MUST exit with the applicable code (`2` for invalid usage/config/schema; `3` for IO/parser failure) and MUST leave existing managed artifacts (including reports) unchanged.
 - The final commit order for `--force` MUST be deterministic: first stage all replacement file contents and the initialization report outside their final paths, then atomically commit them as a single unit by replacing `parley.yaml`, `inventory.yaml`, `canonical-inventory.json`, `context-anchor.yaml`, `glossary.yaml`, `translation-memory.sqlite` and adding the initialization report under `<resolved --report-dir>/validation/`. The command MUST NOT delete `.parley/` or `<project-root>/reports/` as directories during this commit.
 - If any atomic commit step fails after it begins (including failure to persist the initialization report), the command MUST exit with code `3` and MUST rollback the entire commit unit:
@@ -265,6 +265,10 @@ Initialization artifact contracts (MVP):
 
 - The command MUST create `parley.yaml` such that it references the authoritative inventory record's `localization_id` as the project's authoritative localization.
 - The command MUST create `canonical-inventory.json` deterministically from the authoritative localization file.
+- The command MUST create `context-anchor.yaml` with one blank context entry for each canonical key.
+  - Each scaffolded entry MUST be keyed by the canonical localization key.
+  - Each scaffolded entry MUST have an empty `context` string.
+  - Scaffolded blank context entries MUST NOT satisfy populated per-key context requirements for translation.
   - If the authoritative file cannot be read, or the parser cannot parse it (including format/content mismatch), or write-back fails for required artifacts, the command MUST fail with exit code `3`.
 
 Atomicity (MVP):
@@ -281,14 +285,14 @@ Expected artifacts:
 - `parley.yaml`
 - `inventory.yaml`
 - `canonical-inventory.json`
-- Schema-valid empty `context-anchor.yaml` placeholder
+- Schema-valid `context-anchor.yaml` with blank per-key context slots
 - Schema-valid empty `glossary.yaml` placeholder
 - `translation-memory.sqlite`
 - Initialization report under `<resolved --report-dir>/validation/`
 
 Context-anchor authority (MVP):
 
-- `context-anchor.yaml` is created as a schema-valid empty placeholder by `parley project init`.
+- `context-anchor.yaml` is created with blank per-key context slots by `parley project init`.
 - In the MVP, population of per-key context is a manual (human-authored) workflow: users MAY edit `context-anchor.yaml` directly, and no CLI command in this spec is required to auto-populate per-key context.
 - `parley localization add` and `parley translate` only consume and validate `context-anchor.yaml`; they MUST NOT mutate it.
 
@@ -364,6 +368,22 @@ Expected artifacts:
 - No new artifacts.
 
 ## 6. Localization Commands
+
+### 6.0 `parley locale list`
+
+Prints common locale-code suggestions. This command is a convenience reference, not an exhaustive BCP 47 registry.
+
+```text
+parley locale list [--query QUERY]
+```
+
+Behavior (MVP):
+
+- The command MUST NOT require a project root.
+- The command MUST output common locale suggestions with conventional locale code, Parley stored locale, iOS `.lproj` hint, and Android `values` directory hint.
+- If `--query` is provided, the command MUST filter suggestions by case-insensitive terms matched against language names, locale codes, stored locale codes, and notes.
+- Text output SHOULD be tabular.
+- JSON output MUST include a `locales` array.
 
 ### 6.1 `parley localization add`
 
@@ -587,6 +607,22 @@ Exit behavior (MVP):
 - If validation produces one or more blocking findings and the atomic commit succeeds, the command MUST exit with code `1`.
 - Otherwise (no blocking findings) and the atomic commit succeeds, the command MUST exit with code `0`.
 
+### 6.2 `parley localization list`
+
+Prints registered locale/file mappings from `inventory.yaml`.
+
+```text
+parley localization list [--project-root PATH]
+```
+
+Behavior (MVP):
+
+- The command MUST read schema-valid `parley.yaml` and `inventory.yaml`.
+- The command MUST output every localization record sorted by `(locale, role, path, localization_id)`.
+- Text output SHOULD include a table with `locale`, `role`, `format`, `status`, `path`, and `localization_id`.
+- JSON output MUST include a `localizations` array with those fields.
+- The command MUST NOT write reports or mutate project artifacts.
+
 ## 7. Validation Commands
 
 ### 7.1 `parley validate`
@@ -663,12 +699,45 @@ Exit behavior (MVP):
 
 ## 8. Translation Commands
 
+### 8.0 `parley tm import-target`
+
+Imports an existing registered target localization into translation memory without mutating the target localization file.
+
+```text
+parley tm import-target --target-locale LOCALE [--target-path PATH] [--status draft|reviewed|approved|locked] [--dry-run]
+```
+
+Options (MVP):
+
+| Option | Type | Required | Description |
+| --- | --- | --- | --- |
+| `--target-locale LOCALE` | BCP 47 string | yes | Target locale to import into translation memory. |
+| `--target-path PATH` | path | no | Target file path disambiguator under `<project-root>`. Required when multiple target records have the same locale. |
+| `--status draft|reviewed|approved|locked` | enum | no | Human status assigned to imported records. Defaults to `reviewed`. |
+| `--dry-run` | boolean | no | Evaluate and report import candidates without mutating translation memory. |
+
+Behavior (MVP):
+
+- The command MUST resolve exactly one registered target localization by normalized target locale and optional target path.
+- The command MUST read and parse the resolved target file using the inventory-declared format.
+- For each canonical key present in the target with a matching placeholder signature, the command MUST create or update a current translation-memory record with `provenance=imported`, `human_status` equal to `--status`, and `last_translated_source_hash` equal to the current authoritative `content_hash`.
+- The command MUST mark competing current records for the same `(project_id, key, source_locale, target_locale)` as not current when it imports a record for that key.
+- The command MUST NOT mutate the target localization file.
+- Missing target keys, extra target keys, and placeholder mismatches MUST be reported as blocking findings and MUST NOT prevent valid matching keys from being imported.
+- If `--dry-run` is true, the command MUST write the import report but MUST NOT mutate `translation-memory.sqlite`.
+
+Report requirements (MVP):
+
+- The report MUST be written under `<resolved --report-dir>/translation_memory/`.
+- The report command name MUST be `tm_import_target`.
+- The report summary MUST include `canonical_key_count`, `imported_count`, `finding_count`, `tm_written`, and `dry_run`.
+
 ### 8.1 `parley translate`
 
 Translates from the project's authoritative localization into a target localization in project mode.
 
 ```text
-parley translate --target-locale LOCALE [--target-path PATH] [--dry-run] [--reuse-mode tm_only|tm_then_provider|provider_only]
+parley translate --target-locale LOCALE [--target-path PATH] [--create-target] [--format FORMAT] [--dry-run] [--reuse-mode tm_only|tm_then_provider|provider_only] [--no-context]
 ```
 
 Project-mode requirement (MVP):
@@ -681,13 +750,17 @@ Options (MVP):
 | Option | Type | Required | Description |
 | --- | --- | --- | --- |
 | `--target-locale LOCALE` | BCP 47 string | yes | Target locale to translate into. |
-| `--target-path PATH` | path | no | Target file path override under `<project-root>`. In the MVP, this option MUST NOT create new inventory entries; if provided, it MUST match the resolved target inventory entry `path`. |
+| `--target-path PATH` | path | no | Target file path override under `<project-root>`. For existing targets, it must match the resolved inventory entry `path`; with `--create-target`, it is the path for the new target record. |
+| `--create-target` | boolean | no | Create/register a missing target inventory entry at `--target-path`. Requires `--target-path`. |
+| `--format FORMAT` | `ios_strings|android_xml` | no | Parser format for `--create-target`. If omitted, infer from `--target-path`. |
 | `--dry-run` | boolean | no | When true, MUST NOT modify any managed artifacts. Reports MUST still be written. |
 | `--reuse-mode tm_only|tm_then_provider|provider_only` | enum | no | Defaults to `tm_then_provider`. Controls whether the command may reuse translation memory and/or call a provider. |
+| `--no-context` | boolean | no | Bypass `context-anchor.yaml` presence/population requirements for this invocation. Provider generation proceeds without project context and the translation report MUST record `context_mode=disabled`. |
 
 Preconditions (MVP):
 
-- The command MUST read and schema-validate `parley.yaml`, `inventory.yaml`, `canonical-inventory.json`, `translation-memory.sqlite`, and `context-anchor.yaml`.
+- The command MUST read and schema-validate `parley.yaml`, `inventory.yaml`, `canonical-inventory.json`, and `translation-memory.sqlite`.
+- Unless `--no-context` is set, the command MUST also read and schema-validate `context-anchor.yaml`.
   - If any required artifact is missing or schema-invalid, the command MUST fail with exit code `2`.
 - The command MUST attempt to read and schema-validate `glossary.yaml`.
   - If `glossary.yaml` is missing, the command MUST behave as if an empty ruleset is present (no terminology constraints).
@@ -704,14 +777,19 @@ Localization format resolution for translate (MVP):
 - If either resolved inventory entry has a missing or unsupported `format`, the command MUST fail with exit code `2` before attempting to parse the corresponding localization file.
 - If parsing fails under the resolved format (including format/content mismatch), the command MUST fail with exit code `3` with `failure_category=source_parse_error` or `failure_category=target_parse_error` as appropriate.
 
-- The command MUST enforce the project-mode context anchor requirement before any provider calls:
+- Unless `--no-context` is set, the command MUST enforce the project-mode context anchor requirement before any provider calls:
   - `context-anchor.yaml` MUST contain populated per-key context for project-mode translation.
   - A context anchor that is schema-valid but effectively empty or unpopulated for translation MUST be treated as an error.
   - For MVP determinism, “populated per-key context” means: for every canonical key present in validated `canonical-inventory.json`, the context anchor MUST provide a non-empty (after trimming whitespace) context value for that key.
   - If this requirement is not met, the command MUST fail fast with exit code `2` and MUST NOT perform any provider calls or stage any managed-artifact mutations.
+- If `--no-context` is set, missing, schema-invalid, or unpopulated `context-anchor.yaml` MUST NOT prevent translation. The command MUST omit context-anchor validation and MUST record this operator choice in the translation report inputs and summary.
 - The command MUST resolve exactly one target inventory entry for the normalized `--target-locale` deterministically.
   - The candidate set is all inventory entries with `role=target` whose `locale` equals the normalized `--target-locale`.
-  - If the candidate set is empty, the command MUST fail with exit code `2`.
+  - If the candidate set is empty and `--create-target` is omitted, the command MUST fail with exit code `2`.
+  - If the candidate set is empty and `--create-target` is set, the command MUST require `--target-path`, canonicalize `--target-path` to a project-relative path, infer or use the requested format, and prepare a draft target inventory record for that locale/path.
+    - If the target file already exists, it MUST parse under the resolved format before the command may proceed.
+    - If `--dry-run` is true, the command MUST NOT create the target file or mutate `inventory.yaml`.
+    - If `--dry-run` is false and the translation otherwise succeeds, the command MUST write the target file and update `inventory.yaml` atomically with the translation report and translation-memory write-back.
   - If the candidate set contains exactly one entry, that entry is the resolved target.
     - If `--target-path` is provided, the command MUST canonicalize `--target-path` to a project-relative path using the same canonicalization rules used for localization IDs, and MUST fail with exit code `2` if the canonicalized `--target-path` does not exactly equal the resolved target inventory entry `path`.
   - If the candidate set contains more than one entry:
@@ -723,7 +801,8 @@ Translation report eligibility (MVP):
 
 - Translation report persistence requirements apply only after the command has successfully:
   - Resolved `<project-root>`.
-  - Schema-validated `parley.yaml`, `inventory.yaml`, `canonical-inventory.json`, `translation-memory.sqlite`, and `context-anchor.yaml`.
+  - Schema-validated `parley.yaml`, `inventory.yaml`, `canonical-inventory.json`, and `translation-memory.sqlite`.
+  - Schema-validated `context-anchor.yaml`, unless `--no-context` is set.
   - Loaded glossary rules from `glossary.yaml` (or treated it as an empty ruleset when missing).
   - Resolved the authoritative inventory entry.
   - Resolved the target inventory entry (including validating `--target-path` match when provided).
@@ -812,7 +891,9 @@ Report requirements (translation, MVP):
   - `target_locale`
   - `target_path` (the resolved target inventory entry `path`)
   - `reuse_mode`
-  - `provider_status` (plus conditional provider fields per global Provider status reporting)
+- `provider_status` (plus conditional provider fields per global Provider status reporting)
+- `context_mode`, set to `required` or `disabled`
+- `target_would_create`, `target_created`, and `target_registered`
   - `failure_category` when the exit code is `2`, `3`, or `4`
   - `per_key_outcomes` array in canonical-key order
 - `failure_category` closed enum values (MVP):
@@ -939,7 +1020,7 @@ This CLI spec is the authority for the command surface, option behavior, and exi
 
 This CLI Command Specification is “done enough” for MVP implementation when the following observable checks hold:
 
-- **Project init artifacts (5.1):** `parley project init` produces `parley.yaml`, `inventory.yaml`, `canonical-inventory.json`, and a schema-valid empty `context-anchor.yaml` placeholder, plus an initialization report.
+- **Project init artifacts (5.1):** `parley project init` produces `parley.yaml`, `inventory.yaml`, `canonical-inventory.json`, and a schema-valid `context-anchor.yaml` with blank per-key context slots, plus an initialization report.
 - **Add-localization artifacts (6.1):** For validation-report-eligible invocations in project mode, `parley localization add` emits a validation report that includes canonical-inventory structural baseline findings (missing/extra keys and placeholder-signature mismatches). When `--confidence-mode` resolves to `anchor` or `standalone` and the outcome exit code is `0` or `1`, it also emits a confidence report; mode selection and provider-skipped behavior follow the rules in 6.1 (no silent ambiguity between standalone vs relative-to-anchor).
 - **Command output/failure completeness:** Each MVP command defined in sections 5–8 names its terminal outputs (artifacts/reports) and at least one obvious failure category (e.g., parser/IO, artifact schema invalid, provider required/unavailable, blocking validation findings).
 - **Authority alignment:** This leaf spec defines the command surface, required artifact/report write locations, and exit behavior; the HLD remains the architecture authority for authoritative-producer/mutation boundaries, and detailed schemas/enums/contracts are owned by the leaf specs listed in section 14.

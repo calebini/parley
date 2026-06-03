@@ -3,15 +3,17 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 import sqlite3
+from typing import Callable
 
 from parley.artifacts import load_project_artifacts, resolve_project_root, schema_issues_for_required
 from parley.atomic import commit_files
 from parley.errors import EXIT_BLOCKING_FINDINGS, EXIT_IO_OR_PARSER, EXIT_OK, EXIT_PROVIDER, EXIT_USAGE_OR_SCHEMA, ParleyError, UsageError
 from parley.hashing import sha256_canonical_json
-from parley.parsers import ParsedEntry, parse_localization, serialize_localization
+from parley.parsers import ParsedEntry, infer_format, parse_localization, serialize_localization
 from parley.paths import canonical_relative_path, resolve_report_dir
 from parley.providers import ProviderConfigurationError, ProviderInvocationError, TranslationRequest, translation_provider
 from parley.reports import prepare_report, utc_now
+from parley.serialization import yaml_dump
 from parley.validation import CommandResult
 
 
@@ -33,16 +35,20 @@ def translate_project(
     project_root: str | None,
     target_locale: str,
     target_path: str | None,
+    create_target: bool,
+    target_format: str | None,
     reuse_mode: str,
     provider: str,
     dry_run: bool,
     no_provider: bool,
+    no_context: bool,
     report_dir: str | None,
     cwd: Path,
     provider_command: str | None = None,
     provider_timeout_seconds: int | None = None,
     provider_request_delivery: str | None = None,
     provider_response_mode: str | None = None,
+    progress_callback: Callable[[str, str, int, int], None] | None = None,
 ) -> CommandResult:
     started_at = utc_now()
     try:
@@ -54,23 +60,26 @@ def translate_project(
                 "inventory.yaml",
                 "canonical-inventory.json",
                 "translation-memory.sqlite",
-                "context-anchor.yaml",
-            ],
+            ] + ([] if no_context else ["context-anchor.yaml"]),
         )
         if artifact_issues:
             message = "; ".join(issue.message for issue in artifact_issues)
             return CommandResult(EXIT_USAGE_OR_SCHEMA, [], message)
-        artifacts = load_project_artifacts(root, include_canonical=True)
+        artifacts = load_project_artifacts(root, include_canonical=True, include_context=not no_context)
         assert artifacts.canonical_inventory is not None
         canonical = artifacts.canonical_inventory
-        _ensure_populated_context_anchor(artifacts.context_anchor, canonical)
+        if not no_context:
+            _ensure_populated_context_anchor(artifacts.context_anchor, canonical)
         authoritative = _authoritative_record(artifacts.inventory, artifacts.manifest)
         normalized_target_locale = _lower_ascii(target_locale)
-        target = _target_record(
+        target, inventory_after_create, target_created_for_run = _target_record(
             root=root,
             inventory=artifacts.inventory,
             target_locale=normalized_target_locale,
             target_path=target_path,
+            create_target=create_target,
+            target_format=target_format,
+            dry_run=dry_run,
             cwd=cwd,
         )
         report_root = resolve_report_dir(root, report_dir)
@@ -94,7 +103,12 @@ def translate_project(
             per_key_outcomes=[],
             failure_category="source_io_error",
             dry_run=dry_run,
+            create_target=create_target,
+            target_would_create=target_created_for_run,
+            target_created=False,
+            target_registered=False,
             no_provider=no_provider,
+            no_context=no_context,
             provider=provider,
             message=str(exc),
         )
@@ -112,14 +126,21 @@ def translate_project(
             per_key_outcomes=[],
             failure_category="source_parse_error",
             dry_run=dry_run,
+            create_target=create_target,
+            target_would_create=target_created_for_run,
+            target_created=False,
+            target_registered=False,
             no_provider=no_provider,
+            no_context=no_context,
             provider=provider,
             message=str(exc),
         )
 
     target_entries: dict[str, ParsedEntry] = {}
     target_file = root / target["path"]
-    if target_file.exists():
+    if target_created_for_run and dry_run:
+        target_entries = {}
+    elif target_file.exists():
         try:
             target_content = target_file.read_text(encoding="utf-8")
             target_parsed = parse_localization(target_content, target["format"])
@@ -138,7 +159,12 @@ def translate_project(
                 per_key_outcomes=[],
                 failure_category="target_io_error",
                 dry_run=dry_run,
+                create_target=create_target,
+                target_would_create=target_created_for_run,
+                target_created=False,
+                target_registered=False,
                 no_provider=no_provider,
+                no_context=no_context,
                 provider=provider,
                 message=str(exc),
             )
@@ -156,7 +182,12 @@ def translate_project(
                 per_key_outcomes=[],
                 failure_category="target_parse_error",
                 dry_run=dry_run,
+                create_target=create_target,
+                target_would_create=target_created_for_run,
+                target_created=False,
+                target_registered=False,
                 no_provider=no_provider,
+                no_context=no_context,
                 provider=provider,
                 message=str(exc),
             )
@@ -182,7 +213,12 @@ def translate_project(
             per_key_outcomes=outcomes,
             failure_category="source_missing",
             dry_run=dry_run,
+            create_target=create_target,
+            target_would_create=target_created_for_run,
+            target_created=False,
+            target_registered=False,
             no_provider=no_provider,
+            no_context=no_context,
             provider=provider,
         )
 
@@ -215,7 +251,12 @@ def translate_project(
             per_key_outcomes=outcomes,
             failure_category="tm_current_conflict",
             dry_run=dry_run,
+            create_target=create_target,
+            target_would_create=target_created_for_run,
+            target_created=False,
+            target_registered=False,
             no_provider=no_provider,
+            no_context=no_context,
             provider=provider,
         )
     except sqlite3.DatabaseError as exc:
@@ -260,6 +301,7 @@ def translate_project(
                     canonical=canonical,
                     source_locale=artifacts.manifest["project"]["authoritative_locale"],
                     target_locale=normalized_target_locale,
+                    progress_callback=progress_callback,
                 )
                 exit_code = EXIT_OK
                 failure_category = None
@@ -298,6 +340,8 @@ def translate_project(
 
     validation_findings: list[dict] = []
     files: dict[Path, bytes] = {}
+    target_created = False
+    target_registered = False
     if exit_code == EXIT_OK:
         staged_entries = _staged_target_entries(canonical_keys, target_entries, outcomes)
         staged_content = serialize_localization(staged_entries, target["format"])
@@ -307,7 +351,12 @@ def translate_project(
             exit_code = EXIT_BLOCKING_FINDINGS
             failure_category = "blocking_validation_findings"
         elif not dry_run:
+            if target_created_for_run:
+                target["last_observed_hash"] = staged_parsed.normalized_hash
+                files[root / "inventory.yaml"] = yaml_dump(inventory_after_create).encode("utf-8")
+                target_registered = True
             files[target_file] = staged_content.encode("utf-8")
+            target_created = target_created_for_run
             try:
                 tm_bytes = _translation_memory_after_writeback(
                     tm_path=root / artifacts.manifest["artifacts"]["translation_memory"],
@@ -335,7 +384,12 @@ def translate_project(
         per_key_outcomes=outcomes,
         failure_category=failure_category,
         dry_run=dry_run,
+        create_target=create_target,
+        target_would_create=target_created_for_run,
+        target_created=target_created,
+        target_registered=target_registered,
         no_provider=no_provider,
+        no_context=no_context,
         provider=provider,
         files=files,
         provider_skip_reason=provider_skip_reason,
@@ -737,7 +791,12 @@ def _write_translation_report(
     per_key_outcomes: list[dict],
     failure_category: str | None,
     dry_run: bool,
+    create_target: bool,
+    target_would_create: bool,
+    target_created: bool,
+    target_registered: bool,
     no_provider: bool,
+    no_context: bool,
     provider: str,
     files: dict[Path, bytes] | None = None,
     provider_skip_reason: str | None = None,
@@ -774,7 +833,10 @@ def _write_translation_report(
             "target_path": target["path"],
             "reuse_mode": reuse_mode,
             "dry_run": dry_run,
+            "create_target": create_target,
+            "target_would_create": target_would_create,
             "no_provider": no_provider,
+            "no_context": no_context,
             "provider": provider,
         },
         summary={
@@ -784,8 +846,12 @@ def _write_translation_report(
             "skipped_count": sum(1 for item in per_key_outcomes if item["outcome"] == "skipped"),
             "generated_count": sum(1 for item in per_key_outcomes if item["outcome"] == "generated"),
             "written_target": written_target,
+            "target_would_create": target_would_create,
+            "target_created": target_created,
+            "target_registered": target_registered,
             "tm_written": tm_written,
             "dry_run": dry_run,
+            "context_mode": "disabled" if no_context else "required",
             "provider_id": provider,
             "provider_status": provider_status,
             "target_path": target["path"],
@@ -812,7 +878,17 @@ def _authoritative_record(inventory: dict, manifest: dict) -> dict:
     return matches[0]
 
 
-def _target_record(*, root: Path, inventory: dict, target_locale: str, target_path: str | None, cwd: Path) -> dict:
+def _target_record(
+    *,
+    root: Path,
+    inventory: dict,
+    target_locale: str,
+    target_path: str | None,
+    create_target: bool,
+    target_format: str | None,
+    dry_run: bool,
+    cwd: Path,
+) -> tuple[dict, dict, bool]:
     candidates = [
         record
         for record in inventory["localizations"]
@@ -821,9 +897,40 @@ def _target_record(*, root: Path, inventory: dict, target_locale: str, target_pa
     if target_path:
         rel_target_path = canonical_relative_path(root, target_path, cwd.absolute())
         candidates = [record for record in candidates if record.get("path") == rel_target_path]
-    if len(candidates) != 1:
+    if len(candidates) == 1:
+        return candidates[0], inventory, False
+    if candidates:
         raise UsageError("unable to resolve exactly one target localization")
-    return candidates[0]
+    if not create_target:
+        raise UsageError("unable to resolve exactly one target localization")
+    if not target_path:
+        raise UsageError("--create-target requires --target-path")
+    rel_target_path = canonical_relative_path(root, target_path, cwd.absolute())
+    selected_format = target_format or infer_format(rel_target_path)
+    if selected_format not in {"ios_strings", "android_xml"}:
+        raise UsageError("unable to determine target localization format")
+    target_file = root / rel_target_path
+    if target_file.exists() and not target_file.is_file():
+        raise UsageError("--target-path exists but is not a file")
+    if target_file.exists():
+        content = target_file.read_text(encoding="utf-8")
+        parse_localization(content, selected_format)
+    record = {
+        "localization_id": f"{target_locale}::{rel_target_path}",
+        "locale": target_locale,
+        "format": selected_format,
+        "path": rel_target_path,
+        "role": "target",
+        "status": "draft",
+        "parser": selected_format,
+        "last_observed_hash": "" if dry_run or not target_file.exists() else parse_localization(target_file.read_text(encoding="utf-8"), selected_format).normalized_hash,
+    }
+    updated_inventory = dict(inventory)
+    updated_inventory["localizations"] = sorted(
+        [*inventory["localizations"], record],
+        key=lambda item: (item["locale"], item["path"], item["localization_id"]),
+    )
+    return record, updated_inventory, True
 
 
 def _ensure_populated_context_anchor(context_anchor: dict | None, canonical: dict) -> None:
@@ -886,13 +993,24 @@ def _generate_outcomes(
     canonical: dict,
     source_locale: str,
     target_locale: str,
+    progress_callback: Callable[[str, str, int, int], None] | None = None,
 ) -> list[dict]:
     generated: list[dict] = []
+    generated_total = sum(1 for item in outcomes if item["outcome"] == "generated")
+    generated_index = 0
     for item in outcomes:
         if item["outcome"] != "generated":
             generated.append(item)
             continue
         canonical_entry = canonical["entries"][item["key"]]
+        generated_index += 1
+        if progress_callback is not None:
+            progress_callback(
+                item["key"],
+                canonical_entry["authoritative_value"],
+                generated_index,
+                generated_total,
+            )
         response = provider_client.translate(
             TranslationRequest(
                 key=item["key"],

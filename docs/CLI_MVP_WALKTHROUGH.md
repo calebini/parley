@@ -19,13 +19,9 @@ PYTHONPATH=src python3 -m parley project init \
   --locale en-US
 ```
 
-Seed placeholder context for local MVP testing:
+Context for local MVP testing:
 
-```sh
-PYTHONPATH=src python3 -m parley context seed \
-  --project-root "$WORKDIR" \
-  --mode placeholder
-```
+`project init` scaffolds `context-anchor.yaml` with one blank context entry for every canonical key. For context-aware translation, replace those blank values with meaningful product/context descriptions. This walkthrough uses `--no-context` below to exercise the literal/dummy-provider path.
 
 Create and add an empty target localization:
 
@@ -41,6 +37,15 @@ PYTHONPATH=src python3 -m parley localization add \
 
 The empty target reports blocking validation findings because required keys are missing. That is expected; translation fills the target next.
 
+For existing target files with stable translations, import them into translation memory:
+
+```sh
+PYTHONPATH=src python3 -m parley tm import-target \
+  --project-root "$WORKDIR" \
+  --target-locale fr-FR \
+  --status reviewed
+```
+
 Run deterministic dummy translation:
 
 ```sh
@@ -48,7 +53,8 @@ PYTHONPATH=src python3 -m parley translate \
   --project-root "$WORKDIR" \
   --target-locale fr-FR \
   --reuse-mode provider_only \
-  --provider dummy
+  --provider dummy \
+  --no-context
 ```
 
 Validate the generated target:

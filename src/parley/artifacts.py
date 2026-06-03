@@ -119,7 +119,7 @@ def _artifact_status(path: Path, artifact: str, kind: str) -> str:
     return "present"
 
 
-def load_project_artifacts(project_root: Path, *, include_canonical: bool = True) -> ProjectArtifacts:
+def load_project_artifacts(project_root: Path, *, include_canonical: bool = True, include_context: bool = True) -> ProjectArtifacts:
     manifest = read_yaml_artifact(project_root / "parley.yaml")
     _validate_yaml_artifact("parley.yaml", manifest)
     inventory = read_yaml_artifact(project_root / "inventory.yaml")
@@ -129,7 +129,7 @@ def load_project_artifacts(project_root: Path, *, include_canonical: bool = True
         canonical = read_json_artifact(project_root / "canonical-inventory.json")
         _validate_json_artifact("canonical-inventory.json", canonical)
     context = None
-    if (project_root / "context-anchor.yaml").exists():
+    if include_context and (project_root / "context-anchor.yaml").exists():
         context = read_yaml_artifact(project_root / "context-anchor.yaml")
         _validate_yaml_artifact("context-anchor.yaml", context)
     glossary = None

@@ -13,6 +13,36 @@ from parley.serialization import pretty_json, yaml_dump
 from parley.validation import CommandResult
 
 
+def localization_list(*, project_root: str | None, cwd: Path) -> CommandResult:
+    try:
+        root = resolve_project_root(project_root, cwd)
+        artifacts = load_project_artifacts(root, include_canonical=False, include_context=False)
+        records = sorted(
+            artifacts.inventory["localizations"],
+            key=lambda item: (item["locale"], item["role"], item["path"], item["localization_id"]),
+        )
+        return CommandResult(
+            EXIT_OK,
+            [],
+            payload={
+                "project_root": str(root),
+                "localizations": [
+                    {
+                        "locale": record["locale"],
+                        "role": record["role"],
+                        "format": record["format"],
+                        "status": record["status"],
+                        "path": record["path"],
+                        "localization_id": record["localization_id"],
+                    }
+                    for record in records
+                ],
+            },
+        )
+    except ParleyError as exc:
+        return CommandResult(exc.exit_code, [], str(exc))
+
+
 def localization_add(
     *,
     project_root: str | None,

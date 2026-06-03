@@ -93,6 +93,49 @@ class ValidationAndLocalizationTests(unittest.TestCase):
             report = root / "reports" / "validation" / "localization_add--20260515T050000000000Z-ffffffffffffffffffffffffffffffff.json"
             self.assertTrue(report.exists())
 
+    def test_localization_list_prints_locale_mapping_table(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            init_project(root)
+            target = root / "fr.lproj" / "Localizable.strings"
+            target.parent.mkdir()
+            target.write_text('"hello" = "Bonjour %@";\n"bye" = "Au revoir";\n', encoding="utf-8")
+            with stable_run_env("2026-05-15T05:30:00.000000Z", "a" * 32):
+                add_code = run_cli(
+                    [
+                        "localization",
+                        "add",
+                        str(target),
+                        "--project-root",
+                        str(root),
+                        "--locale",
+                        "fr-FR",
+                    ]
+                )
+            self.assertEqual(add_code, 0)
+
+            code, stdout, _ = run_cli_capture(["localization", "list", "--project-root", str(root)])
+
+            self.assertEqual(code, 0)
+            self.assertIn("locale", stdout)
+            self.assertIn("en-us", stdout)
+            self.assertIn("authoritative", stdout)
+            self.assertIn("fr-fr", stdout)
+            self.assertIn("fr.lproj/Localizable.strings", stdout)
+
+    def test_localization_list_json_outputs_locale_mappings(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            init_project(root)
+
+            code, stdout, _ = run_cli_capture(["--output-format", "json", "localization", "list", "--project-root", str(root)])
+
+            self.assertEqual(code, 0)
+            payload = json.loads(stdout)
+            self.assertEqual(payload["localizations"][0]["locale"], "en-us")
+            self.assertEqual(payload["localizations"][0]["role"], "authoritative")
+            self.assertEqual(payload["localizations"][0]["path"], "en.lproj/Localizable.strings")
+
     def test_validate_missing_inventory_writes_no_report(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

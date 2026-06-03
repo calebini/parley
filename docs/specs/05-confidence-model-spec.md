@@ -288,7 +288,7 @@ Context anchor booleans (MVP semantics):
 - `context_anchor_present` MUST be `true` iff the run was able to locate and read a `context-anchor.yaml` artifact; otherwise it MUST be `false`.
 - `context_anchor_valid` MUST be `true` iff `context_anchor_present = true` and the artifact passes schema validation; otherwise it MUST be `false`.
 - `context_anchor_populated` MUST be `true` iff `context_anchor_valid = true` and the parsed artifact contains one or more per-key context records; otherwise it MUST be `false`.
-  - A schema-valid empty placeholder `context-anchor.yaml` (for example created by `parley project init`) is considered unpopulated.
+  - A schema-valid `context-anchor.yaml` with only blank scaffold entries (for example created by `parley project init`) is considered unpopulated.
 
 Determinism requirements:
 

@@ -8,7 +8,8 @@ if [[ "${PARLEY_RUN_CODEX_SMOKE:-}" != "1" ]]; then
 fi
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-project_root="$(mktemp -d "${TMPDIR:-/tmp}/parley-codex-smoke.XXXXXX")"
+smoke_root="$(mktemp -d "${TMPDIR:-/tmp}/parley-codex-smoke.XXXXXX")"
+project_root="${smoke_root}/run-root"
 
 mkdir -p "${project_root}/en.lproj" "${project_root}/fr.lproj"
 printf '"hello" = "Hello, %%@";\n' > "${project_root}/en.lproj/Localizable.strings"
@@ -23,9 +24,24 @@ python3 -m parley project init \
   --locale en-US \
   --format ios_strings
 
-python3 -m parley context seed \
-  --project-root "${project_root}" \
-  --mode placeholder
+python3 - "${project_root}" <<'PY'
+import sys
+from pathlib import Path
+
+project_root = Path(sys.argv[1])
+(project_root / "context-anchor.yaml").write_text(
+    '''schema_version: "1.0"
+project_id: "codexsmoke"
+authoritative_locale: "en-us"
+project_context:
+  description: "Codex smoke synthetic strings."
+entries:
+  hello:
+    context: "Greeting shown in the synthetic smoke test."
+''',
+    encoding="utf-8",
+)
+PY
 
 set +e
 python3 -m parley localization add \
@@ -86,6 +102,7 @@ if summary.get("written_target") is not True:
     raise SystemExit("target file was not written")
 
 print(f"codex smoke project: {project_root}")
+print(f"codex smoke workspace: {project_root.parent}")
 print(f"codex smoke target: {target_path}")
 print(f"codex smoke report: {report_path}")
 PY

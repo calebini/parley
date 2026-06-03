@@ -82,7 +82,7 @@ Scope:
   - `glossary.yaml`
   - `translation-memory.sqlite`
   - `reports/`
-- Create a schema-valid empty context anchor placeholder without provider calls.
+  - Create a schema-valid context anchor with blank per-key context slots without provider calls.
 - Create an empty glossary placeholder with `rules: []`.
 - Initialize translation memory as an empty SQLite database or minimal placeholder consistent with the Translation Memory spec once its minimum DB contract is confirmed.
 - Write an initialization report through the shared report writer.

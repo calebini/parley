@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from helpers import init_project, run_cli, stable_run_env
+from helpers import init_project, run_cli, run_cli_capture, stable_run_env
 from parley.serialization import yaml_dump, yaml_load
 
 
@@ -150,6 +150,194 @@ class TranslateTests(unittest.TestCase):
             self.assertEqual([item["outcome"] for item in payload["per_key_outcomes"]], ["generated", "generated"])
             self.assertEqual(payload["summary"]["generated_count"], 2)
             self.assertEqual(_summary_flags(payload), (True, True, False, "dummy", "used"))
+
+    def test_translate_provider_progress_prints_generated_counter(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            init_project(root)
+            _populate_context_anchor(root)
+            _add_empty_target(root)
+
+            with stable_run_env("2026-05-15T14:05:00.000000Z", "1" * 32):
+                code, stdout, stderr = run_cli_capture(
+                    [
+                        "translate",
+                        "--project-root",
+                        str(root),
+                        "--target-locale",
+                        "fr-FR",
+                        "--reuse-mode",
+                        "provider_only",
+                        "--provider",
+                        "dummy",
+                    ]
+                )
+
+            self.assertEqual(code, 0)
+            self.assertIn("command=translate", stdout)
+            self.assertIn("translating 1/2 bye: Bye\n", stderr)
+            self.assertIn("translating 2/2 hello: Hello %@\n", stderr)
+
+    def test_translate_provider_progress_is_suppressed_for_json_output(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            init_project(root)
+            _populate_context_anchor(root)
+            _add_empty_target(root)
+
+            with stable_run_env("2026-05-15T14:06:00.000000Z", "2" * 32):
+                code, stdout, stderr = run_cli_capture(
+                    [
+                        "--output-format",
+                        "json",
+                        "translate",
+                        "--project-root",
+                        str(root),
+                        "--target-locale",
+                        "fr-FR",
+                        "--reuse-mode",
+                        "provider_only",
+                        "--provider",
+                        "dummy",
+                    ]
+            )
+
+            self.assertEqual(code, 0)
+            self.assertNotIn("translating ", stderr)
+            self.assertEqual(json.loads(stdout)["command"], "translate")
+
+    def test_translate_no_context_allows_literal_generation_from_blank_scaffold(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            init_project(root)
+            target = _add_empty_target(root)
+
+            with stable_run_env("2026-05-15T14:30:00.000000Z", "9" * 32):
+                blocked_code = run_cli(
+                    [
+                        "translate",
+                        "--project-root",
+                        str(root),
+                        "--target-locale",
+                        "fr-FR",
+                        "--reuse-mode",
+                        "provider_only",
+                        "--provider",
+                        "dummy",
+                    ]
+                )
+
+            self.assertEqual(blocked_code, 2)
+            self.assertFalse((root / "reports" / "translation" / "translate--20260515T143000000000Z-99999999999999999999999999999999.json").exists())
+
+            with stable_run_env("2026-05-15T14:31:00.000000Z", "c" * 32):
+                code = run_cli(
+                    [
+                        "translate",
+                        "--project-root",
+                        str(root),
+                        "--target-locale",
+                        "fr-FR",
+                        "--reuse-mode",
+                        "provider_only",
+                        "--provider",
+                        "dummy",
+                        "--no-context",
+                    ]
+                )
+
+            self.assertEqual(code, 0)
+            self.assertEqual(
+                target.read_text(encoding="utf-8"),
+                '"bye" = "[fr-fr] Bye";\n"hello" = "[fr-fr] Hello %@";\n',
+            )
+            report = root / "reports" / "translation" / "translate--20260515T143100000000Z-cccccccccccccccccccccccccccccccc.json"
+            payload = json.loads(report.read_text(encoding="utf-8"))
+            self.assertTrue(payload["inputs"]["no_context"])
+            self.assertEqual(payload["summary"]["context_mode"], "disabled")
+            self.assertEqual(payload["provider_status"], "used")
+
+    def test_translate_create_target_dry_run_reports_without_creating_file_or_inventory(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            init_project(root)
+            target = root / "it.lproj" / "Localizable.strings"
+
+            with stable_run_env("2026-05-15T14:40:00.000000Z", "d" * 32):
+                code = run_cli(
+                    [
+                        "translate",
+                        "--project-root",
+                        str(root),
+                        "--target-locale",
+                        "it-IT",
+                        "--target-path",
+                        str(target),
+                        "--create-target",
+                        "--reuse-mode",
+                        "provider_only",
+                        "--provider",
+                        "dummy",
+                        "--no-context",
+                        "--dry-run",
+                    ]
+                )
+
+            self.assertEqual(code, 0)
+            self.assertFalse(target.exists())
+            inventory = yaml_load((root / "inventory.yaml").read_text(encoding="utf-8"))
+            self.assertEqual([record["locale"] for record in inventory["localizations"]], ["en-us"])
+            report = root / "reports" / "translation" / "translate--20260515T144000000000Z-dddddddddddddddddddddddddddddddd.json"
+            payload = json.loads(report.read_text(encoding="utf-8"))
+            self.assertTrue(payload["inputs"]["create_target"])
+            self.assertTrue(payload["inputs"]["target_would_create"])
+            self.assertTrue(payload["summary"]["target_would_create"])
+            self.assertFalse(payload["summary"]["target_created"])
+            self.assertFalse(payload["summary"]["target_registered"])
+            self.assertFalse(payload["summary"]["written_target"])
+
+    def test_translate_create_target_registers_and_writes_new_target(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            init_project(root)
+            target = root / "it.lproj" / "Localizable.strings"
+
+            with stable_run_env("2026-05-15T14:41:00.000000Z", "e" * 32):
+                code = run_cli(
+                    [
+                        "translate",
+                        "--project-root",
+                        str(root),
+                        "--target-locale",
+                        "it-IT",
+                        "--target-path",
+                        str(target),
+                        "--create-target",
+                        "--reuse-mode",
+                        "provider_only",
+                        "--provider",
+                        "dummy",
+                        "--no-context",
+                    ]
+                )
+
+            self.assertEqual(code, 0)
+            self.assertEqual(
+                target.read_text(encoding="utf-8"),
+                '"bye" = "[it-it] Bye";\n"hello" = "[it-it] Hello %@";\n',
+            )
+            inventory = yaml_load((root / "inventory.yaml").read_text(encoding="utf-8"))
+            target_records = [record for record in inventory["localizations"] if record["locale"] == "it-it"]
+            self.assertEqual(len(target_records), 1)
+            self.assertEqual(target_records[0]["path"], "it.lproj/Localizable.strings")
+            self.assertEqual(target_records[0]["role"], "target")
+            self.assertTrue(target_records[0]["last_observed_hash"])
+            self.assertEqual(len(_tm_rows(root)), 2)
+            report = root / "reports" / "translation" / "translate--20260515T144100000000Z-eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee.json"
+            payload = json.loads(report.read_text(encoding="utf-8"))
+            self.assertTrue(payload["summary"]["target_created"])
+            self.assertTrue(payload["summary"]["target_registered"])
+            self.assertTrue(payload["summary"]["written_target"])
 
     def test_translate_tm_then_provider_reuses_and_generates(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

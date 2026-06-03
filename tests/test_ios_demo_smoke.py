@@ -13,6 +13,7 @@ sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from helpers import run_cli, stable_run_env
+from parley.serialization import yaml_dump
 
 
 class IosDemoSmokeTests(unittest.TestCase):
@@ -123,10 +124,8 @@ class IosDemoSmokeTests(unittest.TestCase):
                     ]
             )
             self.assertEqual(init_code, 0)
-            with stable_run_env("2026-05-15T11:00:30.000000Z", "a" * 32):
-                seed_code = run_cli(["context", "seed", "--project-root", str(root)])
-            self.assertEqual(seed_code, 0)
             self.assertEqual(_context_entry_count(root), 8)
+            _populate_context_anchor(root)
 
             with stable_run_env("2026-05-15T11:01:00.000000Z", "6" * 32):
                 add_code = run_cli(
@@ -220,6 +219,21 @@ def _tm_count(root: Path) -> int:
 def _context_entry_count(root: Path) -> int:
     text = (root / "context-anchor.yaml").read_text(encoding="utf-8")
     return sum(1 for line in text.splitlines() if line.startswith("  ") and line.rstrip().endswith(":"))
+
+
+def _populate_context_anchor(root: Path) -> None:
+    canonical = json.loads((root / "canonical-inventory.json").read_text(encoding="utf-8"))
+    anchor = {
+        "schema_version": "1.0",
+        "project_id": canonical["project_id"],
+        "authoritative_locale": canonical["authoritative_locale"],
+        "project_context": {"description": "Pocket Tasks demo"},
+        "entries": {
+            key: {"context": f"UI copy for {key}"}
+            for key in sorted(canonical["entries"])
+        },
+    }
+    (root / "context-anchor.yaml").write_text(yaml_dump(anchor), encoding="utf-8")
 
 
 if __name__ == "__main__":
