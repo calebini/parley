@@ -11,7 +11,7 @@ from parley.errors import EXIT_BLOCKING_FINDINGS, EXIT_IO_OR_PARSER, EXIT_OK, EX
 from parley.glossary_terms import resolve_constraints, terminology_findings
 from parley.hashing import sha256_canonical_json
 from parley.parsers import ParsedEntry, infer_format, parse_localization, serialize_localization
-from parley.paths import canonical_relative_path, resolve_report_dir
+from parley.paths import canonical_localization_path, localization_file_path, resolve_report_dir
 from parley.providers import ProviderConfigurationError, ProviderInvocationError, TranslationRequest, translation_provider
 from parley.reports import prepare_report, utc_now
 from parley.serialization import yaml_dump
@@ -75,6 +75,7 @@ def translate_project(
         normalized_target_locale = _lower_ascii(target_locale)
         target, inventory_after_create, target_created_for_run = _target_record(
             root=root,
+            manifest=artifacts.manifest,
             inventory=artifacts.inventory,
             target_locale=normalized_target_locale,
             target_path=target_path,
@@ -83,12 +84,13 @@ def translate_project(
             dry_run=dry_run,
             cwd=cwd,
         )
+        target_file = localization_file_path(root, artifacts.manifest, target["path"])
         report_root = resolve_report_dir(root, report_dir)
     except ParleyError as exc:
         return CommandResult(exc.exit_code, [], str(exc))
 
     try:
-        source_content = (root / authoritative["path"]).read_text(encoding="utf-8")
+        source_content = localization_file_path(root, artifacts.manifest, authoritative["path"]).read_text(encoding="utf-8")
         source_parsed = parse_localization(source_content, authoritative["format"])
     except OSError as exc:
         return _write_translation_report(
@@ -97,6 +99,7 @@ def translate_project(
             started_at=started_at,
             project_id=artifacts.project_id,
             target=target,
+            target_file=target_file,
             target_locale=normalized_target_locale,
             reuse_mode=reuse_mode,
             exit_code=EXIT_IO_OR_PARSER,
@@ -120,6 +123,7 @@ def translate_project(
             started_at=started_at,
             project_id=artifacts.project_id,
             target=target,
+            target_file=target_file,
             target_locale=normalized_target_locale,
             reuse_mode=reuse_mode,
             exit_code=EXIT_IO_OR_PARSER,
@@ -138,7 +142,6 @@ def translate_project(
         )
 
     target_entries: dict[str, ParsedEntry] = {}
-    target_file = root / target["path"]
     if target_created_for_run and dry_run:
         target_entries = {}
     elif target_file.exists():
@@ -153,6 +156,7 @@ def translate_project(
                 started_at=started_at,
                 project_id=artifacts.project_id,
                 target=target,
+                target_file=target_file,
                 target_locale=normalized_target_locale,
                 reuse_mode=reuse_mode,
                 exit_code=EXIT_IO_OR_PARSER,
@@ -176,6 +180,7 @@ def translate_project(
                 started_at=started_at,
                 project_id=artifacts.project_id,
                 target=target,
+                target_file=target_file,
                 target_locale=normalized_target_locale,
                 reuse_mode=reuse_mode,
                 exit_code=EXIT_IO_OR_PARSER,
@@ -207,6 +212,7 @@ def translate_project(
             started_at=started_at,
             project_id=artifacts.project_id,
             target=target,
+            target_file=target_file,
             target_locale=normalized_target_locale,
             reuse_mode=reuse_mode,
             exit_code=EXIT_USAGE_OR_SCHEMA,
@@ -245,6 +251,7 @@ def translate_project(
             started_at=started_at,
             project_id=artifacts.project_id,
             target=target,
+            target_file=target_file,
             target_locale=normalized_target_locale,
             reuse_mode=reuse_mode,
             exit_code=EXIT_USAGE_OR_SCHEMA,
@@ -390,6 +397,7 @@ def translate_project(
         started_at=started_at,
         project_id=artifacts.project_id,
         target=target,
+        target_file=target_file,
         target_locale=normalized_target_locale,
         reuse_mode=reuse_mode,
         exit_code=exit_code,
@@ -797,6 +805,7 @@ def _write_translation_report(
     started_at: str,
     project_id: str,
     target: dict,
+    target_file: Path,
     target_locale: str,
     reuse_mode: str,
     exit_code: int,
@@ -818,7 +827,7 @@ def _write_translation_report(
     message: str | None = None,
 ) -> CommandResult:
     files = files or {}
-    written_target = any(path == root / target["path"] for path in files)
+    written_target = any(path == target_file for path in files)
     tm_written = any(path.name == "translation-memory.sqlite" for path in files)
     extra_fields = {
         "target_locale": target_locale,
@@ -894,6 +903,7 @@ def _authoritative_record(inventory: dict, manifest: dict) -> dict:
 def _target_record(
     *,
     root: Path,
+    manifest: dict,
     inventory: dict,
     target_locale: str,
     target_path: str | None,
@@ -908,7 +918,7 @@ def _target_record(
         if record.get("role") == "target" and record.get("locale") == target_locale
     ]
     if target_path:
-        rel_target_path = canonical_relative_path(root, target_path, cwd.absolute())
+        rel_target_path = canonical_localization_path(root, manifest, target_path, cwd.absolute())
         candidates = [record for record in candidates if record.get("path") == rel_target_path]
     if len(candidates) == 1:
         return candidates[0], inventory, False
@@ -918,11 +928,11 @@ def _target_record(
         raise UsageError("unable to resolve exactly one target localization")
     if not target_path:
         raise UsageError("--create-target requires --target-path")
-    rel_target_path = canonical_relative_path(root, target_path, cwd.absolute())
+    rel_target_path = canonical_localization_path(root, manifest, target_path, cwd.absolute())
     selected_format = target_format or infer_format(rel_target_path)
     if selected_format not in {"ios_strings", "android_xml"}:
         raise UsageError("unable to determine target localization format")
-    target_file = root / rel_target_path
+    target_file = localization_file_path(root, manifest, rel_target_path)
     if target_file.exists() and not target_file.is_file():
         raise UsageError("--target-path exists but is not a file")
     if target_file.exists():
@@ -955,7 +965,7 @@ def _ensure_populated_context_anchor(context_anchor: dict | None, canonical: dic
     for key in sorted(canonical["entries"]):
         value = entries.get(key)
         if isinstance(value, dict):
-            value = value.get("context") or value.get("description")
+            value = value.get("context") or value.get("description") or value.get("context_description")
         if not isinstance(value, str) or not value.strip():
             raise UsageError("context-anchor.yaml lacks populated per-key context", failure_category="artifact_schema")
 

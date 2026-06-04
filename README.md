@@ -101,9 +101,30 @@ PYTHONPATH=src python3 -m parley project init \
   --locale en-US
 ```
 
+If you want Parley artifacts kept out of the app localization tree, initialize a sibling artifact folder instead:
+
+```sh
+PYTHONPATH=src python3 -m parley project init \
+  --project-root "$WORKDIR/parley" \
+  --name "Pocket Tasks" \
+  --authoritative "$WORKDIR/en.lproj/Localizable.strings" \
+  --locale en-US
+```
+
+In that layout, Parley writes reports, inventory, glossary, context, and translation memory under `$WORKDIR/parley`, while inventory paths still refer to localization files such as `en.lproj/Localizable.strings` under `$WORKDIR`.
+
 Context:
 
 `project init` scaffolds `context-anchor.yaml` with one blank context entry for every canonical key. For production translation, replace those blank values with real product/context descriptions. This synthetic quick start uses `--no-context` below to exercise the literal/dummy-provider path without pretending blank context is meaningful.
+
+Check context readiness:
+
+```sh
+PYTHONPATH=src python3 -m parley context validate \
+  --project-root "$WORKDIR"
+```
+
+Freshly initialized projects should report blank context findings until `context-anchor.yaml` is populated.
 
 Create and add an empty French target:
 
@@ -239,6 +260,8 @@ The MVP intentionally centers project mode. Direct file-to-file translation is d
 
 Parley treats context as something worth storing and reviewing. `project init` creates blank per-key context slots in `context-anchor.yaml`; humans or future provider-backed context generation should fill those slots with meaningful descriptions before translation.
 
+`parley context validate` checks that every canonical key has populated context and flags stale context entries left behind after source-string changes.
+
 When context is unavailable or inappropriate for a literal pass, `parley translate --no-context` bypasses the populated-context precondition and records `context_mode: disabled` in the translation report.
 
 ### Translation memory is a quality asset
@@ -287,6 +310,8 @@ Inspect the CLI:
 PYTHONPATH=src python3 -m parley --help
 PYTHONPATH=src python3 -m parley locale list --query german
 PYTHONPATH=src python3 -m parley localization list --help
+PYTHONPATH=src python3 -m parley glossary init --help
+PYTHONPATH=src python3 -m parley glossary init --with-example --help
 PYTHONPATH=src python3 -m parley translate --help
 PYTHONPATH=src python3 -m parley tm import-target --help
 ```

@@ -5,8 +5,9 @@ import json
 from pathlib import Path
 import sys
 
+from parley.context import context_validate
 from parley.errors import EXIT_USAGE_OR_SCHEMA
-from parley.glossary import glossary_import, glossary_list, glossary_suggest_from_tm, glossary_validate
+from parley.glossary import glossary_import, glossary_init, glossary_list, glossary_suggest_from_tm, glossary_validate
 from parley.locale_reference import locale_reference_list
 from parley.localization import localization_add, localization_list
 from parley.project_init import project_init
@@ -95,6 +96,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     glossary = subparsers.add_parser("glossary")
     glossary_sub = glossary.add_subparsers(dest="glossary_command")
+    glossary_init_parser = glossary_sub.add_parser("init")
+    glossary_init_parser.add_argument("--project-root")
+    glossary_init_parser.add_argument("--force", action="store_true")
+    glossary_init_parser.add_argument("--with-example", action="store_true")
+    glossary_init_parser.add_argument("--report-dir")
     glossary_import_parser = glossary_sub.add_parser("import")
     glossary_import_parser.add_argument("--project-root")
     glossary_import_parser.add_argument("--file", required=True)
@@ -112,6 +118,12 @@ def build_parser() -> argparse.ArgumentParser:
     glossary_suggest_parser.add_argument("--from-tm", action="store_true", required=True)
     glossary_suggest_parser.add_argument("--target-locale")
     glossary_suggest_parser.add_argument("--report-dir")
+
+    context = subparsers.add_parser("context")
+    context_sub = context.add_subparsers(dest="context_command")
+    context_validate_parser = context_sub.add_parser("validate")
+    context_validate_parser.add_argument("--project-root")
+    context_validate_parser.add_argument("--report-dir")
 
     return parser
 
@@ -283,6 +295,23 @@ def main(argv: list[str] | None = None) -> int:
         if result.message:
             print(result.message, file=sys.stderr)
         return result.exit_code
+    if args.command_group == "glossary" and args.glossary_command == "init":
+        result = glossary_init(
+            project_root=args.project_root,
+            force=args.force,
+            with_example=args.with_example,
+            report_dir=args.report_dir,
+            cwd=Path.cwd(),
+        )
+        _emit_payload_or_summary(
+            command="glossary_init",
+            result=result,
+            output_format=args.output_format,
+            quiet=args.quiet,
+        )
+        if result.message:
+            print(result.message, file=sys.stderr)
+        return result.exit_code
     if args.command_group == "glossary" and args.glossary_command == "list":
         result = glossary_list(project_root=args.project_root, locale=args.locale, query=args.query, cwd=Path.cwd())
         if args.output_format == "json":
@@ -317,6 +346,17 @@ def main(argv: list[str] | None = None) -> int:
         )
         _emit_payload_or_summary(
             command="glossary_suggest",
+            result=result,
+            output_format=args.output_format,
+            quiet=args.quiet,
+        )
+        if result.message:
+            print(result.message, file=sys.stderr)
+        return result.exit_code
+    if args.command_group == "context" and args.context_command == "validate":
+        result = context_validate(project_root=args.project_root, report_dir=args.report_dir, cwd=Path.cwd())
+        _emit_payload_or_summary(
+            command="context_validate",
             result=result,
             output_format=args.output_format,
             quiet=args.quiet,

@@ -12,6 +12,7 @@ from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from parley.cli import main
 from parley.serialization import yaml_load
@@ -71,6 +72,38 @@ class ProjectInitTests(unittest.TestCase):
                     "SELECT value FROM metadata WHERE key = 'schema_version'"
                 ).fetchone()[0]
             self.assertEqual(schema_version, "1.0")
+
+    def test_project_init_allows_artifact_root_sibling_to_localizations(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            app_root = Path(tmp) / "HID Approve"
+            project_root = app_root / "parley"
+            source = app_root / "en.lproj" / "Localizable.strings"
+            source.parent.mkdir(parents=True)
+            source.write_text('"hello" = "Hello %@";\n"bye" = "Bye";\n', encoding="utf-8")
+
+            with stable_run_env():
+                exit_code = run_cli(
+                    [
+                        "project",
+                        "init",
+                        "--project-root",
+                        str(project_root),
+                        "--name",
+                        "HID Approve",
+                        "--authoritative",
+                        str(source),
+                        "--locale",
+                        "en-US",
+                    ]
+                )
+
+            self.assertEqual(exit_code, 0)
+            self.assertTrue((project_root / "parley.yaml").exists())
+            self.assertTrue((project_root / "reports" / "validation" / _expected_report_name()).exists())
+            manifest = yaml_load((project_root / "parley.yaml").read_text(encoding="utf-8"))
+            inventory = yaml_load((project_root / "inventory.yaml").read_text(encoding="utf-8"))
+            self.assertEqual(manifest["project"]["localization_root"], "..")
+            self.assertEqual(inventory["localizations"][0]["path"], "en.lproj/Localizable.strings")
 
     def test_project_init_without_force_refuses_existing_managed_path(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -132,9 +165,10 @@ class ProjectInitTests(unittest.TestCase):
             )
 
     def test_project_init_rejects_authoritative_outside_project(self) -> None:
-        with tempfile.TemporaryDirectory() as project_tmp, tempfile.TemporaryDirectory() as outside_tmp:
-            root = Path(project_tmp)
-            outside = Path(outside_tmp) / "Localizable.strings"
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "App" / "parley"
+            outside = Path(tmp) / "OtherApp" / "Localizable.strings"
+            outside.parent.mkdir(parents=True)
             outside.write_text('"hello" = "Hello";\n', encoding="utf-8")
             with stable_run_env():
                 exit_code = run_cli(

@@ -164,6 +164,9 @@ def _validate_yaml_artifact(artifact: str, data: dict[str, Any]) -> None:
         for field in ["id", "name", "authoritative_localization_id", "authoritative_locale"]:
             if not project.get(field):
                 raise UsageError(f"parley.yaml missing project.{field}", failure_category="artifact_schema")
+        localization_root = project.get("localization_root", ".")
+        if not isinstance(localization_root, str) or not localization_root or Path(localization_root).is_absolute() or "\\" in localization_root:
+            raise UsageError("parley.yaml project.localization_root must be relative", failure_category="artifact_schema")
         for field in ["inventory", "canonical_inventory", "context_anchor", "glossary", "translation_memory"]:
             if not artifacts.get(field):
                 raise UsageError(f"parley.yaml missing artifacts.{field}", failure_category="artifact_schema")

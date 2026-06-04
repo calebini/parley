@@ -7,7 +7,7 @@ from parley.artifacts import inspect_artifacts, load_project_artifacts, resolve_
 from parley.errors import EXIT_BLOCKING_FINDINGS, EXIT_IO_OR_PARSER, EXIT_OK, EXIT_USAGE_OR_SCHEMA, FileIOError, ParleyError, UsageError
 from parley.glossary_terms import terminology_findings
 from parley.parsers import parse_localization
-from parley.paths import resolve_report_dir
+from parley.paths import localization_file_path, resolve_report_dir
 from parley.reports import prepare_report, utc_now
 
 
@@ -83,7 +83,7 @@ def validate_project(
         canonical_entries = canonical["entries"]
         for record in selected:
             status = "validated"
-            path = root / record["path"]
+            path = localization_file_path(root, artifacts.manifest, record["path"])
             try:
                 content = path.read_text(encoding="utf-8")
                 parsed = parse_localization(content, record["format"])

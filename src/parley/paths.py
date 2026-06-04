@@ -40,6 +40,45 @@ def canonical_relative_path(project_root: Path, input_path: Path | str, resoluti
     return rel
 
 
+def canonical_localization_path(project_root: Path, manifest: dict, input_path: Path | str, resolution_base: Path) -> str:
+    root = localization_root(project_root, manifest)
+    return canonical_relative_path(root, input_path, resolution_base)
+
+
+def localization_file_path(project_root: Path, manifest: dict, rel_path: str) -> Path:
+    validate_relative_path(rel_path)
+    return localization_root(project_root, manifest) / rel_path
+
+
+def localization_root(project_root: Path, manifest: dict) -> Path:
+    raw = manifest.get("project", {}).get("localization_root", ".")
+    if not isinstance(raw, str) or not raw:
+        raise UsageError("project.localization_root must be a non-empty string")
+    if Path(raw).is_absolute() or "\\" in raw:
+        raise UsageError("project.localization_root must be relative")
+    normalized = lexical_normalize(project_root / raw)
+    return Path(normalized)
+
+
+def derive_init_localization_paths(project_root: Path, input_path: Path | str, resolution_base: Path) -> tuple[str, str]:
+    input_path = Path(input_path)
+    resolved = input_path if input_path.is_absolute() else resolution_base / input_path
+    resolved_norm = lexical_normalize(resolved)
+    project_norm = lexical_normalize(project_root)
+    parent_norm = lexical_normalize(project_root.parent)
+    if resolved_norm != project_norm and resolved_norm.startswith(project_norm.rstrip("/") + "/"):
+        rel = resolved_norm[len(project_norm) :].lstrip("/")
+        validate_relative_path(rel)
+        return ".", rel
+    if resolved_norm != parent_norm and resolved_norm.startswith(parent_norm.rstrip("/") + "/"):
+        rel = resolved_norm[len(parent_norm) :].lstrip("/")
+        if rel.startswith(project_root.name.rstrip("/") + "/"):
+            raise UsageError(f"path is outside localization root: {input_path}")
+        validate_relative_path(rel)
+        return "..", rel
+    raise UsageError(f"path is outside project localization root: {input_path}")
+
+
 def validate_relative_path(path: str) -> None:
     if not path or path == ".":
         raise UsageError("relative path must not be empty")
@@ -61,4 +100,3 @@ def resolve_report_dir(project_root: Path, report_dir: str | None) -> Path:
     if rel != "reports" and not rel.startswith("reports/"):
         raise UsageError("--report-dir must resolve under <project-root>/reports/")
     return project_root / rel
-

@@ -10,7 +10,7 @@ import tempfile
 from parley.errors import EXIT_OK, FileIOError, ParleyError, UsageError
 from parley.hashing import sha256_canonical_json, sha256_text
 from parley.parsers import infer_format, parse_localization
-from parley.paths import canonical_relative_path, resolve_report_dir
+from parley.paths import derive_init_localization_paths, localization_file_path, resolve_report_dir
 from parley.reports import PreparedReport, ensure_report_can_be_written, prepare_report, utc_now
 from parley.serialization import pretty_json, yaml_dump
 
@@ -101,9 +101,10 @@ def _prepare_init(
         if existing:
             raise UsageError(f"project already contains Parley managed paths: {', '.join(existing)}")
 
-    project_rel_path = canonical_relative_path(project_root, authoritative, cwd.absolute())
-    authoritative_path = project_root / project_rel_path
-    selected_format = fmt or infer_format(project_rel_path)
+    localization_root_rel, localization_rel_path = derive_init_localization_paths(project_root, authoritative, cwd.absolute())
+    manifest_for_paths = {"project": {"localization_root": localization_root_rel}}
+    authoritative_path = localization_file_path(project_root, manifest_for_paths, localization_rel_path)
+    selected_format = fmt or infer_format(localization_rel_path)
     if selected_format not in {"ios_strings", "android_xml"}:
         raise UsageError("unable to determine authoritative localization format")
     try:
@@ -117,7 +118,7 @@ def _prepare_init(
 
     normalized_locale = _lower_ascii(locale)
     project_id = _id_from_name(name)
-    localization_id = f"{normalized_locale}::{project_rel_path}"
+    localization_id = f"{normalized_locale}::{localization_rel_path}"
     generated_at = started_at
     canonical_entries = {}
     inventory_hash_input_entries = {}
@@ -157,6 +158,7 @@ def _prepare_init(
             "name": name,
             "authoritative_localization_id": localization_id,
             "authoritative_locale": normalized_locale,
+            "localization_root": localization_root_rel,
         },
         "artifacts": {
             "inventory": "inventory.yaml",
@@ -175,7 +177,7 @@ def _prepare_init(
                 "localization_id": localization_id,
                 "locale": normalized_locale,
                 "format": selected_format,
-                "path": project_rel_path,
+                "path": localization_rel_path,
                 "role": "authoritative",
                 "status": "draft",
                 "parser": selected_format,
@@ -221,7 +223,7 @@ def _prepare_init(
         inputs={
             "project_root": str(project_root),
             "name": name,
-            "authoritative": project_rel_path,
+            "authoritative": localization_rel_path,
             "locale": normalized_locale,
             "format": selected_format,
             "force": force,

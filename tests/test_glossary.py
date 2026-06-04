@@ -16,6 +16,77 @@ from parley.serialization import yaml_dump, yaml_load
 
 
 class GlossaryTests(unittest.TestCase):
+    def test_glossary_init_creates_skeleton_for_existing_project(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            init_project(root)
+            (root / "glossary.yaml").unlink()
+
+            with stable_run_env("2026-05-16T02:40:00.000000Z", "4" * 32):
+                code = run_cli(["glossary", "init", "--project-root", str(root)])
+
+            self.assertEqual(code, 0)
+            glossary = yaml_load((root / "glossary.yaml").read_text(encoding="utf-8"))
+            self.assertEqual(
+                glossary,
+                {
+                    "schema_version": "1.0",
+                    "project_id": "myapp",
+                    "glossary_version": "mvp",
+                    "terms": [],
+                },
+            )
+            report = root / "reports" / "glossary" / "glossary_init--20260516T024000000000Z-44444444444444444444444444444444.json"
+            self.assertTrue(report.exists())
+
+    def test_glossary_init_with_example_creates_instructional_template(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            init_project(root)
+            (root / "glossary.yaml").unlink()
+
+            with stable_run_env("2026-05-16T02:45:00.000000Z", "7" * 32):
+                code = run_cli(["glossary", "init", "--project-root", str(root), "--with-example"])
+
+            self.assertEqual(code, 0)
+            content = (root / "glossary.yaml").read_text(encoding="utf-8")
+            self.assertIn('part_of_speech: "Replace with noun, verb, adjective, product_name, acronym, or phrase"', content)
+            self.assertIn("fr-fr:", content)
+            self.assertIn("de-de:", content)
+            glossary = yaml_load(content)
+            term = glossary["terms"][0]
+            self.assertEqual(term["id"], "replace-with-stable-term-id")
+            self.assertEqual(term["targets"]["de-de"]["term"], "Replace with the preferred translation for another locale")
+            report = root / "reports" / "glossary" / "glossary_init--20260516T024500000000Z-77777777777777777777777777777777.json"
+            payload = json.loads(report.read_text(encoding="utf-8"))
+            self.assertTrue(payload["inputs"]["with_example"])
+            self.assertEqual(payload["summary"]["term_count"], 1)
+
+    def test_glossary_init_refuses_existing_file_without_force(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            init_project(root)
+            before = (root / "glossary.yaml").read_text(encoding="utf-8")
+
+            with stable_run_env("2026-05-16T02:50:00.000000Z", "5" * 32):
+                code = run_cli(["glossary", "init", "--project-root", str(root)])
+
+            self.assertEqual(code, 2)
+            self.assertEqual((root / "glossary.yaml").read_text(encoding="utf-8"), before)
+            self.assertFalse((root / "reports" / "glossary" / "glossary_init--20260516T025000000000Z-55555555555555555555555555555555.json").exists())
+
+    def test_glossary_init_force_replaces_existing_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            init_project(root)
+            _write_glossary(root)
+
+            with stable_run_env("2026-05-16T02:55:00.000000Z", "6" * 32):
+                code = run_cli(["glossary", "init", "--project-root", str(root), "--force"])
+
+            self.assertEqual(code, 0)
+            self.assertEqual(yaml_load((root / "glossary.yaml").read_text(encoding="utf-8"))["terms"], [])
+
     def test_glossary_import_replace_writes_terms_artifact_and_report(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

@@ -49,6 +49,69 @@ class TranslationMemoryImportTests(unittest.TestCase):
             self.assertTrue(payload["summary"]["tm_written"])
             self.assertEqual(payload["findings"], [])
 
+    def test_import_target_uses_manifest_localization_root(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            app_root = Path(tmp) / "HID Approve"
+            root = app_root / "parley"
+            source = app_root / "en.lproj" / "Localizable.strings"
+            source.parent.mkdir(parents=True)
+            source.write_text('"hello" = "Hello %@";\n"bye" = "Bye";\n', encoding="utf-8")
+            with stable_run_env():
+                self.assertEqual(
+                    run_cli(
+                        [
+                            "project",
+                            "init",
+                            "--project-root",
+                            str(root),
+                            "--name",
+                            "HID Approve",
+                            "--authoritative",
+                            str(source),
+                            "--locale",
+                            "en-US",
+                        ]
+                    ),
+                    0,
+                )
+            target = app_root / "fr.lproj" / "Localizable.strings"
+            target.parent.mkdir()
+            target.write_text('"hello" = "Bonjour %@";\n"bye" = "Au revoir";\n', encoding="utf-8")
+            with stable_run_env("2026-05-16T04:10:00.000000Z", "9" * 32):
+                self.assertEqual(
+                    run_cli(
+                        [
+                            "localization",
+                            "add",
+                            str(target),
+                            "--project-root",
+                            str(root),
+                            "--locale",
+                            "fr-FR",
+                        ]
+                    ),
+                    0,
+                )
+
+            with stable_run_env("2026-05-16T04:11:00.000000Z", "8" * 32):
+                code = run_cli(
+                    [
+                        "tm",
+                        "import-target",
+                        "--project-root",
+                        str(root),
+                        "--target-locale",
+                        "fr-FR",
+                        "--status",
+                        "approved",
+                    ]
+                )
+
+            self.assertEqual(code, 0)
+            rows = _tm_rows(root)
+            self.assertEqual(len(rows), 2)
+            self.assertEqual({row["target_value"] for row in rows}, {"Bonjour %@", "Au revoir"})
+
     def test_import_target_imports_valid_entries_while_reporting_missing_keys(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

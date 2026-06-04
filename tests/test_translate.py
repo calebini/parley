@@ -339,6 +339,65 @@ class TranslateTests(unittest.TestCase):
             self.assertTrue(payload["summary"]["target_registered"])
             self.assertTrue(payload["summary"]["written_target"])
 
+    def test_translate_create_target_uses_manifest_localization_root(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            app_root = Path(tmp) / "HID Approve"
+            root = app_root / "parley"
+            source = app_root / "en.lproj" / "Localizable.strings"
+            source.parent.mkdir(parents=True)
+            source.write_text('"hello" = "Hello %@";\n"bye" = "Bye";\n', encoding="utf-8")
+            with stable_run_env():
+                self.assertEqual(
+                    run_cli(
+                        [
+                            "project",
+                            "init",
+                            "--project-root",
+                            str(root),
+                            "--name",
+                            "HID Approve",
+                            "--authoritative",
+                            str(source),
+                            "--locale",
+                            "en-US",
+                        ]
+                    ),
+                    0,
+                )
+            target = app_root / "it.lproj" / "Localizable.strings"
+
+            with stable_run_env("2026-05-15T14:42:00.000000Z", "f" * 32):
+                code = run_cli(
+                    [
+                        "translate",
+                        "--project-root",
+                        str(root),
+                        "--target-locale",
+                        "it-IT",
+                        "--target-path",
+                        str(target),
+                        "--create-target",
+                        "--reuse-mode",
+                        "provider_only",
+                        "--provider",
+                        "dummy",
+                        "--no-context",
+                    ]
+                )
+
+            self.assertEqual(code, 0)
+            self.assertEqual(
+                target.read_text(encoding="utf-8"),
+                '"bye" = "[it-it] Bye";\n"hello" = "[it-it] Hello %@";\n',
+            )
+            inventory = yaml_load((root / "inventory.yaml").read_text(encoding="utf-8"))
+            target_records = [record for record in inventory["localizations"] if record["locale"] == "it-it"]
+            self.assertEqual(target_records[0]["path"], "it.lproj/Localizable.strings")
+            report = root / "reports" / "translation" / "translate--20260515T144200000000Z-ffffffffffffffffffffffffffffffff.json"
+            payload = json.loads(report.read_text(encoding="utf-8"))
+            self.assertTrue(payload["summary"]["written_target"])
+            self.assertTrue(payload["summary"]["target_registered"])
+
     def test_translate_tm_then_provider_reuses_and_generates(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

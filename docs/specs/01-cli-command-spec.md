@@ -79,7 +79,7 @@ Report-root resolution (MVP):
 
 - `--report-dir` defaults to `<project-root>/reports/`.
 - If `--report-dir` is a relative path, it MUST be resolved relative to `<project-root>/reports/`, not the current working directory.
-- The resolved `--report-dir` MUST remain under `<project-root>/reports/` under the project-root-relative path canonicalization and containment rule defined in 6.1. Otherwise the command MUST fail with exit code `2`.
+- The resolved `--report-dir` MUST remain under `<project-root>/reports/` under project-root-relative containment. Otherwise the command MUST fail with exit code `2`.
 
 Provider enablement (MVP):
 
@@ -173,10 +173,12 @@ Canonical command names (MVP):
 | `parley localization add` | `localization_add` |
 | `parley localization list` | `localization_list` |
 | `parley locale list` | `locale_list` |
+| `parley glossary init` | `glossary_init` |
 | `parley glossary import` | `glossary_import` |
 | `parley glossary list` | `glossary_list` |
 | `parley glossary validate` | `glossary_validate` |
 | `parley glossary suggest` | `glossary_suggest` |
+| `parley context validate` | `context_validate` |
 | `parley validate` | `validate` |
 | `parley tm import-target` | `tm_import_target` |
 | `parley translate` | `translate` |
@@ -224,9 +226,9 @@ Options:
 
 | Option | Type | Required | Description |
 | --- | --- | --- | --- |
-| `--project-root PATH` | path | no | Target directory to initialize; defaults to current working directory. |
+| `--project-root PATH` | path | no | Target Parley artifact directory to initialize; defaults to current working directory. |
 | `--name NAME` | string | yes | Project name. |
-| `--authoritative PATH` | path | yes | Authoritative localization file path (under project root). |
+| `--authoritative PATH` | path | yes | Authoritative localization file path under the project localization root. |
 | `--locale LOCALE` | BCP 47 string | yes | Locale of authoritative file. |
 | `--format FORMAT` | `ios_strings|android_xml` | no | Authoritative parser format override. |
 | `--force` | boolean | no | Replace any existing Parley artifacts under project root. |
@@ -249,14 +251,17 @@ Project-root and emptiness rules (MVP):
   - For any managed artifact path in the commit unit that did not exist before invocation, remove it.
   - Remove the initialization report for this invocation if it was already placed at its final path.
   - It MUST NOT leave a mix of old and new core project artifacts that can be mistaken for a successful initialization.
-- The command MUST NOT delete or modify non-Parley files under the target directory, including any existing localization files (such as the file at `--authoritative PATH`).
+- The command MUST NOT delete or modify non-Parley files under the target directory or project localization root, including any existing localization files (such as the file at `--authoritative PATH`).
 - The command MUST write a new initialization report under `<resolved --report-dir>/validation/`.
 
 Initialization artifact contracts (MVP):
 
 - The command MUST create an initial authoritative localization inventory record in `inventory.yaml` for the file identified by `--authoritative PATH`.
-- The command MUST canonicalize `--authoritative PATH` to a project-root-relative path using the canonicalization rules defined in 6.1 (treating `PATH` as resolved from the current working directory).
-  - If the resolved authoritative path is not under `<project-root>`, the command MUST fail with exit code `2`.
+- The command MUST derive `project.localization_root` in `parley.yaml` from the resolved authoritative path:
+  - If the authoritative file resolves under `<project-root>`, `project.localization_root` MUST be `"."`.
+  - Otherwise, if the authoritative file resolves under the parent directory of `<project-root>`, `project.localization_root` MUST be `".."`.
+  - Otherwise, the command MUST fail with exit code `2`.
+- The command MUST canonicalize `--authoritative PATH` to a localization-root-relative path using the localization path canonicalization rules defined in 6.1 (treating `PATH` as resolved from the current working directory).
 - The command MUST normalize the authoritative locale value by lowercasing ASCII letters. This normalized value is the inventory record `locale`.
 - The command MUST set the authoritative inventory record `role` to `authoritative`.
 - The command MUST set the authoritative inventory record `status` to `draft`.
@@ -264,10 +269,10 @@ Initialization artifact contracts (MVP):
   - If `--format` is provided, the command MUST use that format.
   - Otherwise, the command MUST infer from the authoritative file extension using the global parser format resolution mapping.
   - If no rule selects a format (unknown extension), the command MUST fail with exit code `2`.
-- The command MUST assign a stable `localization_id` for the authoritative inventory record using the stable localization ID derivation rule defined in 6.1, treating the normalized locale and canonicalized project-relative path as inputs:
+- The command MUST assign a stable `localization_id` for the authoritative inventory record using the stable localization ID derivation rule defined in 6.1, treating the normalized locale and canonicalized localization-root-relative path as inputs:
 
 ```text
-<normalized_locale>::<project_rel_path>
+<normalized_locale>::<localization_rel_path>
 ```
 
 - The command MUST create `parley.yaml` such that it references the authoritative inventory record's `localization_id` as the project's authoritative localization.
@@ -301,7 +306,7 @@ Context-anchor authority (MVP):
 
 - `context-anchor.yaml` is created with blank per-key context slots by `parley project init`.
 - In the MVP, population of per-key context is a manual (human-authored) workflow: users MAY edit `context-anchor.yaml` directly, and no CLI command in this spec is required to auto-populate per-key context.
-- `parley localization add` and `parley translate` only consume and validate `context-anchor.yaml`; they MUST NOT mutate it.
+- `parley context validate`, `parley localization add`, and `parley translate` only consume and validate `context-anchor.yaml`; they MUST NOT mutate it.
 
 Example:
 
@@ -412,23 +417,21 @@ Options:
 | `--status draft|reviewed|approved|locked` | enum | no | Defaults to `draft`. |
 | `--confidence-mode anchor|standalone|none` | enum | no | Defaults to `anchor` only when `context-anchor.yaml` exists, is schema-valid, and contains populated per-key context; otherwise `standalone`. |
 
-Project-root-relative path canonicalization and containment (MVP):
+Localization path canonicalization and containment (MVP):
 
 - This rule is used for:
   - Inventory record `path` values.
   - Path-based inventory lookup.
   - Stable `localization_id` derivation when `--id` is omitted.
-  - `--report-dir` containment under `<project-root>/reports/` (section 2).
   - `parley translate --target-path` matching.
 - The rule takes three inputs:
-  - `<project-root>`: the resolved project root directory path.
+  - `<localization-root>`: the resolved localization root from `project.localization_root` in `parley.yaml`; during `project init`, this is the derived root described in section 5.1.
   - `input_path`: the user-provided path value.
   - `resolution_base`: an absolute directory path.
 - Resolution base selection:
   - For `parley localization add PATH`, `resolution_base` is the current working directory.
   - For `parley project init --authoritative PATH`, `resolution_base` is the current working directory.
   - For `parley translate --target-path PATH`, `resolution_base` is the current working directory.
-  - For `--report-dir PATH` when PATH is relative, `resolution_base` is `<project-root>/reports/` (per section 2).
 - Canonicalization algorithm:
   1. Resolve `resolved_abs_path`:
      - If `input_path` is absolute, set `resolved_abs_path = input_path`.
@@ -438,28 +441,30 @@ Project-root-relative path canonicalization and containment (MVP):
      - Remove `.` segments.
      - Collapse `..` segments. If collapsing would traverse above the filesystem root, fail with exit code `2`.
      - Remove any trailing `/` (except `/` itself).
-  3. Normalize `<project-root>` absolute path using the same separator and dot-segment rules.
+  3. Normalize `<localization-root>` absolute path using the same separator and dot-segment rules.
   4. Containment check:
-     - The normalized `resolved_abs_path` MUST be under normalized `<project-root>` by lexical prefix (`<project-root>` exactly, or `<project-root>/...`). Otherwise fail with exit code `2`.
+     - The normalized `resolved_abs_path` MUST be under normalized `<localization-root>` by lexical prefix (`<localization-root>` exactly, or `<localization-root>/...`). Otherwise fail with exit code `2`.
      - Symlinks are not dereferenced for containment in the MVP; containment is lexical after normalization.
-  5. Derive `project_rel_path`:
-     - `project_rel_path` is the relative path from normalized `<project-root>` to normalized `resolved_abs_path`, using `/` separators.
-     - `project_rel_path` MUST NOT start with `/`.
-     - `project_rel_path` MUST NOT start with `./`.
-     - `project_rel_path` MUST NOT end with `/`.
+  5. Derive `localization_rel_path`:
+     - `localization_rel_path` is the relative path from normalized `<localization-root>` to normalized `resolved_abs_path`, using `/` separators.
+     - `localization_rel_path` MUST NOT start with `/`.
+     - `localization_rel_path` MUST NOT start with `./`.
+     - `localization_rel_path` MUST NOT end with `/`.
 - Case sensitivity:
-  - The canonicalized `project_rel_path` and containment prefix comparisons are lexical and MUST NOT apply case folding.
+  - The canonicalized `localization_rel_path` and containment prefix comparisons are lexical and MUST NOT apply case folding.
+
+Report directory paths still use project-root-relative containment under `<project-root>/reports/` as defined in section 2.
 
 Stable localization ID derivation (MVP):
 
 - The command MUST normalize the `--locale` value by lowercasing ASCII letters. This normalized value is the inventory record `locale`.
 - If `--id ID` is provided, the command MUST use it as the `localization_id`.
 - Otherwise:
-  - The command MUST canonicalize `PATH` to `project_rel_path` using the canonicalization rule above.
+  - The command MUST canonicalize `PATH` to `localization_rel_path` using the canonicalization rule above.
   - The command MUST derive `localization_id` as:
 
 ```text
-<normalized_locale>::<project_rel_path>
+<normalized_locale>::<localization_rel_path>
 ```
 
 Confidence-mode default selection (MVP):
@@ -564,7 +569,7 @@ Allowed inventory field updates (MVP):
 | Field | Mutable? | Update rule (MVP) |
 | --- | --- | --- |
 | `localization_id` | no | Immutable. The record being updated is selected by `localization_id`. |
-| `path` | no | Immutable. `PATH` MUST canonicalize to the existing record `path` under the same project-root-relative canonicalization rule. |
+| `path` | no | Immutable. `PATH` MUST canonicalize to the existing record `path` under the same localization-root-relative canonicalization rule. |
 | `locale` | no | Immutable. The normalized `--locale` MUST equal the existing record `locale`. |
 | `format` | yes | May be updated only if (a) the invocation explicitly provides `--format`, and (b) `PATH` parses successfully under the resulting format. |
 | `role` | conditional | If `--role target`, the record `role` MUST remain unchanged. If `--role authoritative`, the record `role` MUST be `authoritative`. |
@@ -584,7 +589,7 @@ Atomicity (MVP):
 Operation order and commit point (MVP):
 
 - For a valid invocation, the command MUST apply the following deterministic operation order:
-  1. Resolve `<project-root>`, resolve the report root (`--report-dir`), and canonicalize `PATH` using the project-root-relative path rule used for stable localization ID derivation.
+  1. Resolve `<project-root>`, resolve the report root (`--report-dir`), and canonicalize `PATH` using the localization-root-relative path rule used for stable localization ID derivation.
   2. Resolve the effective parser format for `PATH` using the global parser format resolution rules.
      - If `--format` is omitted, the command MUST treat rule (1) (inventory-based format selection) as applicable only if `inventory.yaml` is present and schema-valid. If `inventory.yaml` is missing or schema-invalid, rule (1) MUST be treated as non-matching and the command MUST proceed to extension-based inference.
   3. Verify `PATH` is readable and parseable under the resolved format.
@@ -635,6 +640,7 @@ Behavior (MVP):
 Glossary commands manage the human-authored terminology artifact. Glossary truth is bring-your-own by default; Parley MAY suggest glossary candidates, but suggestions MUST NOT become authoritative without explicit import or promotion.
 
 ```text
+parley glossary init [--force] [--with-example]
 parley glossary import --file PATH [--merge-mode replace|merge]
 parley glossary list [--locale LOCALE] [--query QUERY]
 parley glossary validate
@@ -643,6 +649,10 @@ parley glossary suggest --from-tm [--target-locale LOCALE]
 
 Behavior (MVP):
 
+- `parley glossary init` MUST create a schema-valid `glossary.yaml` skeleton with the project ID, `glossary_version: "mvp"`, and `terms: []`.
+  - If `glossary.yaml` already exists and `--force` is omitted, the command MUST fail with exit code `2` and MUST NOT mutate the file.
+  - If `--force` is supplied, the command MUST replace the existing glossary with the empty skeleton.
+  - If `--with-example` is supplied, the command MUST write a product-agnostic representative term instead of `terms: []`. The example MUST use self-describing placeholder values, include one fully described target locale, and include one lightweight additional target locale to show how users can expand a term across locales.
 - `parley glossary import` MUST read a `glossary.yaml`-compatible terms file and write the project glossary artifact.
   - `--merge-mode replace` replaces the existing `terms` array after validation.
   - `--merge-mode merge` merges by stable term `id` and MUST fail with exit code `2` on conflicting IDs unless a future force option defines conflict behavior.
@@ -654,7 +664,45 @@ Behavior (MVP):
 
 ## 7. Validation Commands
 
-### 7.1 `parley validate`
+### 7.1 `parley context validate`
+
+Validates `context-anchor.yaml` readiness against the canonical inventory and writes a validation report without mutating project artifacts.
+
+```text
+parley context validate
+```
+
+Behavior (MVP):
+
+- The command MUST resolve `<project-root>` using global project-root resolution rules.
+- The command MUST read and schema-validate `parley.yaml`, `inventory.yaml`, and `canonical-inventory.json`.
+  - If these project baseline artifacts are missing or schema-invalid, the command MUST fail with exit code `2` before writing a validation report.
+- The command MUST validate `context-anchor.yaml` against the canonical key set from `canonical-inventory.json`.
+- The command MUST write exactly one validation report under `<resolved --report-dir>/validation/` for invocations that reach context-anchor validation.
+- The command MUST NOT mutate `context-anchor.yaml` or any other project artifact.
+
+Context readiness rules (MVP):
+
+- If `context-anchor.yaml` is missing, the command MUST report a blocking finding with `code=context_anchor_missing`.
+- If `context-anchor.yaml` is schema-invalid, the command MUST report a blocking finding with `code=context_anchor_schema_invalid`.
+- For every canonical key missing from `context-anchor.yaml.entries`, the command MUST report a blocking finding with `code=context_missing_key`.
+- For every canonical key whose context value is missing, empty, or whitespace-only, the command MUST report a blocking finding with `code=context_blank`.
+- For every key in `context-anchor.yaml.entries` that no longer exists in `canonical-inventory.json`, the command MUST report a non-blocking warning finding with `code=context_stale_key`.
+- A context entry is populated when the entry is either a non-empty string or an object containing a non-empty `context`, `description`, or `context_description` string.
+
+Report requirements (MVP):
+
+- The report `canonical_command` MUST be `context_validate`.
+- The report summary MUST include `canonical_key_count`, `finding_count`, `missing_count`, `blank_count`, and `stale_count`.
+- The report MUST include `context_anchor_path`, `context_complete`, and `validated_context`.
+
+Exit behavior (MVP):
+
+- If baseline project artifacts cannot be read or schema-validated, the command MUST exit with code `2`.
+- Otherwise, if any blocking context finding is produced and report writing succeeds, the command MUST exit with code `1`.
+- Otherwise, if context is complete and report writing succeeds, the command MUST exit with code `0`.
+
+### 7.2 `parley validate`
 
 Validates project-managed localization artifacts and writes a validation report after validation targets have been selected.
 

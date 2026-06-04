@@ -45,7 +45,8 @@ The Project Artifact Schema Specification owns the enclosing schema and placemen
 | `Locale` | BCP 47 locale string, such as `en-US` or `fr-FR`. |
 | `Timestamp` | UTC RFC 3339 timestamp. Unless a leaf command spec states otherwise, timestamps persisted by artifacts and report envelopes defined in this spec MUST be serialized as whole-second UTC RFC 3339 with an explicit `Z` suffix. If a command spec requires a different precision, it MUST still be UTC RFC 3339 and MUST be deterministic. |
 | `Hash` | Lowercase SHA-256 hex digest. |
-| `RelativePath` | Canonical project-root-relative path string. Absolute paths MUST NOT be stored in project artifacts or completed reports. |
+| `RelativePath` | Canonical relative path string scoped by its field. Artifact path fields are relative to `<project-root>`; localization inventory `path` fields are relative to `project.localization_root`. Absolute paths MUST NOT be stored in project artifacts or completed reports. |
+| `LocalizationRoot` | Relative path from `<project-root>` to the directory that contains project localization files. Defaults to `.` when omitted. `..` is allowed so Parley artifacts can live in a sibling folder such as `<app-root>/parley` while localization files live under `<app-root>/*.lproj`. |
 | `ReportFamily` | One of `initialization`, `validation`, `confidence`, `translation`, `comparison`, `glossary`, or `translation_memory`. |
 
 ### 3.1 RelativePath Normalization
@@ -142,6 +143,7 @@ Optional MVP fields:
 | Field | Type | Description |
 | --- | --- | --- |
 | `project.description` | string | Project-level context seed. |
+| `project.localization_root` | `LocalizationRoot` | Directory used to resolve localization inventory paths. Defaults to `.` when omitted. |
 | `defaults.provider` | string | Default provider adapter ID. |
 | `defaults.report_format` | string | If present, MUST be `json` for the MVP. |
 
@@ -157,6 +159,7 @@ project:
   description: Consumer mobile application for account management.
   authoritative_localization_id: loc-en-us
   authoritative_locale: en-US
+  localization_root: .
 artifacts:
   inventory: inventory.yaml
   canonical_inventory: canonical-inventory.json
@@ -187,7 +190,7 @@ Localization record:
 | `localization_id` | `ID` | yes | Stable localization ID referenced by project and reports. |
 | `locale` | `Locale` | yes | File locale. |
 | `format` | enum | yes | `ios_strings` or `android_xml`. |
-| `path` | `RelativePath` | yes | File path relative to project root. |
+| `path` | `RelativePath` | yes | File path relative to `project.localization_root`. |
 | `role` | enum | yes | `authoritative` or `target`. |
 | `status` | enum | yes | `draft`, `reviewed`, `approved`, or `locked`. |
 | `parser` | string | yes | Parser adapter ID. |
@@ -198,7 +201,7 @@ Rules:
 
 - Exactly one localization record MUST have `role: authoritative`.
 - `project.authoritative_localization_id` in `parley.yaml` MUST match that authoritative record's `localization_id`.
-- `path` values MUST be valid `RelativePath` values in canonical serialized form and unique within the inventory.
+- `path` values MUST be valid `RelativePath` values in canonical serialized form, relative to `project.localization_root`, and unique within the inventory.
 - `localization_id` values MUST be unique within the inventory.
 - The inventory is not the source of parser grammar or normalized entry shape; parser details are owned by the Parser Interface and Format Specification.
 

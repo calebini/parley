@@ -11,6 +11,7 @@ sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from helpers import init_project, run_cli, run_cli_capture, stable_run_env
+from parley.serialization import yaml_load
 
 
 class ValidationAndLocalizationTests(unittest.TestCase):
@@ -92,6 +93,58 @@ class ValidationAndLocalizationTests(unittest.TestCase):
             self.assertIn('role: "target"', inventory_text)
             report = root / "reports" / "validation" / "localization_add--20260515T050000000000Z-ffffffffffffffffffffffffffffffff.json"
             self.assertTrue(report.exists())
+
+    def test_localization_add_uses_manifest_localization_root(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            app_root = Path(tmp) / "HID Approve"
+            root = app_root / "parley"
+            source = app_root / "en.lproj" / "Localizable.strings"
+            source.parent.mkdir(parents=True)
+            source.write_text('"hello" = "Hello %@";\n"bye" = "Bye";\n', encoding="utf-8")
+            with stable_run_env():
+                self.assertEqual(
+                    run_cli(
+                        [
+                            "project",
+                            "init",
+                            "--project-root",
+                            str(root),
+                            "--name",
+                            "HID Approve",
+                            "--authoritative",
+                            str(source),
+                            "--locale",
+                            "en-US",
+                        ]
+                    ),
+                    0,
+                )
+            target = app_root / "fr.lproj" / "Localizable.strings"
+            target.parent.mkdir()
+            target.write_text('"hello" = "Bonjour %@";\n"bye" = "Au revoir";\n', encoding="utf-8")
+
+            with stable_run_env("2026-05-15T05:10:00.000000Z", "9" * 32):
+                add_code = run_cli(
+                    [
+                        "localization",
+                        "add",
+                        str(target),
+                        "--project-root",
+                        str(root),
+                        "--locale",
+                        "fr-FR",
+                    ]
+                )
+            with stable_run_env("2026-05-15T05:11:00.000000Z", "8" * 32):
+                validate_code = run_cli(["validate", "--project-root", str(root)])
+
+            self.assertEqual(add_code, 0)
+            self.assertEqual(validate_code, 0)
+            inventory = yaml_load((root / "inventory.yaml").read_text(encoding="utf-8"))
+            paths = {record["locale"]: record["path"] for record in inventory["localizations"]}
+            self.assertEqual(paths["en-us"], "en.lproj/Localizable.strings")
+            self.assertEqual(paths["fr-fr"], "fr.lproj/Localizable.strings")
+            self.assertTrue((root / "reports" / "validation" / "validate--20260515T051100000000Z-88888888888888888888888888888888.json").exists())
 
     def test_localization_list_prints_locale_mapping_table(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

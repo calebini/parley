@@ -8,7 +8,7 @@ from parley.errors import EXIT_BLOCKING_FINDINGS, EXIT_IO_OR_PARSER, EXIT_OK, EX
 from parley.glossary_terms import terminology_findings
 from parley.hashing import sha256_canonical_json, sha256_text
 from parley.parsers import infer_format, parse_localization
-from parley.paths import canonical_relative_path, resolve_report_dir
+from parley.paths import canonical_localization_path, localization_file_path, resolve_report_dir
 from parley.reports import prepare_report, utc_now
 from parley.serialization import pretty_json, yaml_dump
 from parley.validation import CommandResult
@@ -60,11 +60,12 @@ def localization_add(
     try:
         root = resolve_project_root(project_root, cwd)
         report_root = resolve_report_dir(root, report_dir)
-        rel_path = canonical_relative_path(root, path, cwd.absolute())
+        artifacts_for_paths = load_project_artifacts(root, include_canonical=False, include_context=False)
+        rel_path = canonical_localization_path(root, artifacts_for_paths.manifest, path, cwd.absolute())
         selected_format = fmt or _format_from_inventory(root, rel_path) or infer_format(rel_path)
         if selected_format not in {"ios_strings", "android_xml"}:
             raise UsageError("unable to determine localization format")
-        content = (root / rel_path).read_text(encoding="utf-8")
+        content = localization_file_path(root, artifacts_for_paths.manifest, rel_path).read_text(encoding="utf-8")
         parsed = parse_localization(content, selected_format)
     except OSError as exc:
         return _write_parse_failure(started_at, project_root, cwd, report_dir, path, str(exc), "io")

@@ -65,7 +65,7 @@ Determinism requirements (MVP):
   - If the source value is unknown or not applicable: `null`.
   - Otherwise a string normalized by: (1) Unicode NFC, (2) convert CRLF and CR to LF, (3) trim leading/trailing whitespace.
 - `file` source and normalization (MVP):
-  - If the finding is scoped to a project-managed file listed in the project's localization inventory, `file` MUST be the inventory record's project-root-relative path.
+  - If the finding is scoped to a project-managed file listed in the project's localization inventory, `file` MUST be the inventory record's localization-root-relative path.
   - Otherwise, if the finding is scoped to a file under the project root but not present in the inventory, `file` MUST be the project-root-relative path.
   - Otherwise, `file` MUST be `null`.
   - In all cases where `file` is non-`null`, it MUST use forward slashes (`/`) and MUST NOT contain a leading `./`.

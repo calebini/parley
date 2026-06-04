@@ -13,6 +13,40 @@ from parley.serialization import yaml_dump
 from parley.validation import CommandResult
 
 
+def glossary_init(
+    *,
+    project_root: str | None,
+    force: bool,
+    with_example: bool,
+    report_dir: str | None,
+    cwd: Path,
+) -> CommandResult:
+    started_at = utc_now()
+    try:
+        root = resolve_project_root(project_root, cwd)
+        artifacts = load_project_artifacts(root, include_canonical=False, include_context=False)
+        glossary_path = root / "glossary.yaml"
+        if glossary_path.exists() and not force:
+            return CommandResult(EXIT_USAGE_OR_SCHEMA, [], "glossary.yaml already exists; pass --force to replace it")
+        glossary = _empty_glossary(artifacts.project_id)
+        content = _example_glossary_text(artifacts.project_id) if with_example else yaml_dump(glossary)
+        report = _glossary_report(
+            root=root,
+            report_dir=report_dir,
+            started_at=started_at,
+            command="glossary_init",
+            project_id=artifacts.project_id,
+            exit_code=EXIT_OK,
+            inputs={"force": force, "with_example": with_example},
+            summary={"term_count": 1 if with_example else 0, "glossary_written": True},
+            findings=[],
+        )
+        commit_files(root, {glossary_path: content.encode("utf-8")}, {report.path: report.content})
+        return CommandResult(EXIT_OK, [report.path])
+    except ParleyError as exc:
+        return CommandResult(exc.exit_code, [], str(exc))
+
+
 def glossary_import(
     *,
     project_root: str | None,
@@ -240,6 +274,33 @@ def _write_report_only(report) -> None:
 
 def _empty_glossary(project_id: str) -> dict:
     return {"schema_version": "1.0", "project_id": project_id, "glossary_version": "mvp", "terms": []}
+
+
+def _example_glossary_text(project_id: str) -> str:
+    return f'''schema_version: "1.0"
+project_id: "{project_id}"
+glossary_version: "mvp"
+terms:
+  -
+    id: "replace-with-stable-term-id"
+    source: "Replace with the exact source term or phrase to detect"
+    source_locale: "en-us"
+    part_of_speech: "Replace with noun, verb, adjective, product_name, acronym, or phrase"
+    notes: "Explain where this term appears and any usage nuance translators should know."
+    targets:
+      fr-fr:
+        term: "Replace with the preferred translation for this locale"
+        status: "draft"
+        severity: "warning"
+        notes: "Explain why this translation is preferred or when to use it."
+      de-de:
+        term: "Replace with the preferred translation for another locale"
+    forbidden:
+      fr-fr:
+        - "Replace with a translation that should not be used"
+      de-de:
+        - "Optional: replace with a disallowed translation for another locale"
+'''
 
 
 def _slug(value: str) -> str:

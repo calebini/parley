@@ -8,7 +8,7 @@ from parley.atomic import commit_files
 from parley.errors import EXIT_BLOCKING_FINDINGS, EXIT_IO_OR_PARSER, EXIT_OK, EXIT_USAGE_OR_SCHEMA, ParleyError, UsageError
 from parley.hashing import sha256_canonical_json
 from parley.parsers import parse_localization
-from parley.paths import canonical_relative_path, resolve_report_dir
+from parley.paths import canonical_localization_path, localization_file_path, resolve_report_dir
 from parley.reports import prepare_report, utc_now
 from parley.validation import CommandResult
 
@@ -38,13 +38,14 @@ def import_target_to_memory(
         canonical = artifacts.canonical_inventory
         normalized_target_locale = _lower_ascii(target_locale)
         target = _target_record(
+            manifest=artifacts.manifest,
             inventory=artifacts.inventory,
             target_locale=normalized_target_locale,
             target_path=target_path,
             root=root,
             cwd=cwd,
         )
-        target_file = root / target["path"]
+        target_file = localization_file_path(root, artifacts.manifest, target["path"])
         content = target_file.read_text(encoding="utf-8")
         parsed = parse_localization(content, target["format"])
     except FileNotFoundError as exc:
@@ -146,14 +147,14 @@ def import_target_to_memory(
     return CommandResult(exit_code, [report.path])
 
 
-def _target_record(*, inventory: dict, target_locale: str, target_path: str | None, root: Path, cwd: Path) -> dict:
+def _target_record(*, manifest: dict, inventory: dict, target_locale: str, target_path: str | None, root: Path, cwd: Path) -> dict:
     candidates = [
         record
         for record in inventory["localizations"]
         if record.get("role") == "target" and record.get("locale") == target_locale
     ]
     if target_path:
-        rel_target_path = canonical_relative_path(root, target_path, cwd.absolute())
+        rel_target_path = canonical_localization_path(root, manifest, target_path, cwd.absolute())
         candidates = [record for record in candidates if record.get("path") == rel_target_path]
     if len(candidates) != 1:
         raise UsageError("unable to resolve exactly one target localization")
