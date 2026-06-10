@@ -49,6 +49,139 @@ class TranslationMemoryImportTests(unittest.TestCase):
             self.assertTrue(payload["summary"]["tm_written"])
             self.assertEqual(payload["findings"], [])
 
+    def test_import_lproj_dir_registers_targets_and_imports_partial_corpus(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            init_project(root)
+            fr = root / "fr.lproj" / "Localizable.strings"
+            fr.parent.mkdir()
+            fr.write_text('\ufeff"hello" = "Bonjour %@";\n"bye" = "Au revoir";\n', encoding="utf-8")
+            bg = root / "bg.lproj" / "Localizable.strings"
+            bg.parent.mkdir()
+            bg.write_text('"hello" = "Zdravei %@";\n', encoding="utf-8")
+
+            with stable_run_env("2026-05-16T04:05:00.000000Z", "6" * 32):
+                code = run_cli(
+                    [
+                        "tm",
+                        "import-lproj-dir",
+                        "--project-root",
+                        str(root),
+                        "--source-root",
+                        str(root),
+                        "--status",
+                        "approved",
+                        "--locale-map",
+                        "bg=bg-BG",
+                    ]
+                )
+
+            self.assertEqual(code, 1)
+            rows = _tm_rows(root)
+            self.assertEqual(len(rows), 3)
+            self.assertEqual({row["target_locale"] for row in rows}, {"fr-fr", "bg-bg"})
+            self.assertEqual({row["human_status"] for row in rows}, {"approved"})
+            self.assertEqual(fr.read_text(encoding="utf-8"), '\ufeff"hello" = "Bonjour %@";\n"bye" = "Au revoir";\n')
+            inventory = (root / "inventory.yaml").read_text(encoding="utf-8")
+            self.assertIn('locale: "fr-fr"', inventory)
+            self.assertIn('locale: "bg-bg"', inventory)
+            report = root / "reports" / "translation_memory" / "tm_import_lproj_dir--20260516T040500000000Z-66666666666666666666666666666666.json"
+            payload = json.loads(report.read_text(encoding="utf-8"))
+            self.assertEqual(payload["summary"]["discovered_count"], 3)
+            self.assertEqual(payload["summary"]["skipped_authoritative_count"], 1)
+            self.assertEqual(payload["summary"]["target_count"], 2)
+            self.assertEqual(payload["summary"]["registered_count"], 2)
+            self.assertEqual(payload["summary"]["imported_count"], 3)
+            self.assertTrue(payload["summary"]["inventory_written"])
+            self.assertTrue(payload["summary"]["tm_written"])
+            self.assertEqual(payload["findings"][0]["code"], "missing_key")
+            self.assertEqual(payload["findings"][0]["locale"], "bg-bg")
+            by_locale = {item["locale"]: item for item in payload["locale_results"]}
+            self.assertEqual(by_locale["fr-fr"]["imported_count"], 2)
+            self.assertEqual(by_locale["bg-bg"]["missing_count"], 1)
+
+    def test_import_lproj_dir_dry_run_does_not_register_or_write_memory(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            init_project(root)
+            fr = root / "fr.lproj" / "Localizable.strings"
+            fr.parent.mkdir()
+            fr.write_text('"hello" = "Bonjour %@";\n"bye" = "Au revoir";\n', encoding="utf-8")
+            before_inventory = (root / "inventory.yaml").read_text(encoding="utf-8")
+
+            with stable_run_env("2026-05-16T04:06:00.000000Z", "7" * 32):
+                code = run_cli(
+                    [
+                        "tm",
+                        "import-lproj-dir",
+                        "--project-root",
+                        str(root),
+                        "--source-root",
+                        str(root),
+                        "--dry-run",
+                    ]
+                )
+
+            self.assertEqual(code, 0)
+            self.assertEqual((root / "inventory.yaml").read_text(encoding="utf-8"), before_inventory)
+            self.assertEqual(_tm_rows(root), [])
+            report = root / "reports" / "translation_memory" / "tm_import_lproj_dir--20260516T040600000000Z-77777777777777777777777777777777.json"
+            payload = json.loads(report.read_text(encoding="utf-8"))
+            self.assertEqual(payload["summary"]["registered_count"], 1)
+            self.assertEqual(payload["summary"]["imported_count"], 2)
+            self.assertFalse(payload["summary"]["inventory_written"])
+            self.assertFalse(payload["summary"]["tm_written"])
+            self.assertTrue(payload["summary"]["dry_run"])
+
+    def test_import_lproj_dir_uses_manifest_localization_root(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            app_root = Path(tmp) / "Localizable strings"
+            root = app_root / "parley"
+            source = app_root / "en.lproj" / "Localizable.strings"
+            source.parent.mkdir(parents=True)
+            source.write_text('"hello" = "Hello %@";\n"bye" = "Bye";\n', encoding="utf-8")
+            with stable_run_env():
+                self.assertEqual(
+                    run_cli(
+                        [
+                            "project",
+                            "init",
+                            "--project-root",
+                            str(root),
+                            "--name",
+                            "HID Approve",
+                            "--authoritative",
+                            str(source),
+                            "--locale",
+                            "en-US",
+                        ]
+                    ),
+                    0,
+                )
+            target = app_root / "de.lproj" / "Localizable.strings"
+            target.parent.mkdir()
+            target.write_text('"hello" = "Hallo %@";\n"bye" = "Tschuss";\n', encoding="utf-8")
+
+            with stable_run_env("2026-05-16T04:07:00.000000Z", "a" * 32):
+                code = run_cli(
+                    [
+                        "tm",
+                        "import-lproj-dir",
+                        "--project-root",
+                        str(root),
+                        "--source-root",
+                        str(app_root),
+                    ]
+                )
+
+            self.assertEqual(code, 0)
+            inventory = (root / "inventory.yaml").read_text(encoding="utf-8")
+            self.assertIn('path: "de.lproj/Localizable.strings"', inventory)
+            self.assertNotIn('path: "../de.lproj/Localizable.strings"', inventory)
+            rows = _tm_rows(root)
+            self.assertEqual(len(rows), 2)
+            self.assertEqual({row["target_locale"] for row in rows}, {"de-de"})
+
     def test_import_target_uses_manifest_localization_root(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             app_root = Path(tmp) / "HID Approve"

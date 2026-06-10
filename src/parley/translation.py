@@ -49,9 +49,12 @@ def translate_project(
     provider_timeout_seconds: int | None = None,
     provider_request_delivery: str | None = None,
     provider_response_mode: str | None = None,
+    write_order: str = "alphabetical",
     progress_callback: Callable[[str, str, int, int], None] | None = None,
 ) -> CommandResult:
     started_at = utc_now()
+    if write_order not in {"alphabetical", "authoritative"}:
+        return CommandResult(EXIT_USAGE_OR_SCHEMA, [], f"unsupported write order: {write_order}")
     try:
         root = resolve_project_root(project_root, cwd)
         artifact_issues = schema_issues_for_required(
@@ -115,6 +118,7 @@ def translate_project(
             no_provider=no_provider,
             no_context=no_context,
             provider=provider_id,
+            write_order=write_order,
             message=str(exc),
         )
     except ParleyError as exc:
@@ -139,6 +143,7 @@ def translate_project(
             no_provider=no_provider,
             no_context=no_context,
             provider=provider_id,
+            write_order=write_order,
             message=str(exc),
         )
 
@@ -172,6 +177,7 @@ def translate_project(
                 no_provider=no_provider,
                 no_context=no_context,
                 provider=provider_id,
+                write_order=write_order,
                 message=str(exc),
             )
         except ParleyError as exc:
@@ -196,11 +202,13 @@ def translate_project(
                 no_provider=no_provider,
                 no_context=no_context,
                 provider=provider_id,
+                write_order=write_order,
                 message=str(exc),
             )
 
     source_entries = {entry.key: entry for entry in source_parsed.entries}
     canonical_keys = sorted(canonical["entries"])
+    write_keys = _write_keys(canonical_keys, source_parsed.entry_order, write_order)
     missing_source = [key for key in canonical_keys if key not in source_entries]
     if missing_source:
         outcomes = [
@@ -228,6 +236,7 @@ def translate_project(
             no_provider=no_provider,
             no_context=no_context,
             provider=provider_id,
+            write_order=write_order,
         )
 
     try:
@@ -267,6 +276,7 @@ def translate_project(
             no_provider=no_provider,
             no_context=no_context,
             provider=provider_id,
+            write_order=write_order,
         )
     except sqlite3.DatabaseError as exc:
         return CommandResult(EXIT_USAGE_OR_SCHEMA, [], f"invalid translation-memory.sqlite: {exc}")
@@ -369,7 +379,12 @@ def translate_project(
     target_registered = False
     if exit_code == EXIT_OK:
         staged_entries = _staged_target_entries(canonical_keys, target_entries, outcomes)
-        staged_content = serialize_localization(staged_entries, target["format"])
+        staged_entries_for_write = _order_entries_for_write(staged_entries, write_keys)
+        staged_content = serialize_localization(
+            staged_entries_for_write,
+            target["format"],
+            sort_keys=write_order == "alphabetical",
+        )
         staged_parsed = parse_localization(staged_content, target["format"])
         validation_findings = _placeholder_findings(target, staged_parsed.entries, canonical)
         validation_findings.extend(
@@ -431,6 +446,7 @@ def translate_project(
         provider_failure_category=provider_failure_category,
         provider_diagnostics=provider_diagnostics,
         validation_findings=validation_findings,
+        write_order=write_order,
     )
 
 
@@ -849,6 +865,7 @@ def _write_translation_report(
     provider_failure_category: str | None = None,
     provider_diagnostics: dict | None = None,
     validation_findings: list[dict] | None = None,
+    write_order: str = "alphabetical",
     message: str | None = None,
 ) -> CommandResult:
     files = files or {}
@@ -858,6 +875,7 @@ def _write_translation_report(
         "target_locale": target_locale,
         "target_path": target["path"],
         "reuse_mode": reuse_mode,
+        "write_order": write_order,
         "provider_status": provider_status,
         "per_key_outcomes": per_key_outcomes,
     }
@@ -881,6 +899,7 @@ def _write_translation_report(
             "target_locale": target_locale,
             "target_path": target["path"],
             "reuse_mode": reuse_mode,
+            "write_order": write_order,
             "dry_run": dry_run,
             "create_target": create_target,
             "target_would_create": target_would_create,
@@ -1118,6 +1137,23 @@ def _staged_target_entries(
             value = target_entries[key].value
         output.append(ParsedEntry(key=key, value=value, placeholders=[]))
     return output
+
+
+def _write_keys(canonical_keys: list[str], authoritative_order: list[str], write_order: str) -> list[str]:
+    if write_order == "alphabetical":
+        return canonical_keys
+    if write_order != "authoritative":
+        raise UsageError("unsupported write order", failure_category="usage")
+    canonical_set = set(canonical_keys)
+    ordered = [key for key in authoritative_order if key in canonical_set]
+    ordered_set = set(ordered)
+    ordered.extend(key for key in canonical_keys if key not in ordered_set)
+    return ordered
+
+
+def _order_entries_for_write(entries: list[ParsedEntry], write_keys: list[str]) -> list[ParsedEntry]:
+    by_key = {entry.key: entry for entry in entries}
+    return [by_key[key] for key in write_keys if key in by_key]
 
 
 def _placeholder_findings(target: dict, entries: list[ParsedEntry], canonical: dict) -> list[dict]:

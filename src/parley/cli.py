@@ -12,7 +12,8 @@ from parley.locale_reference import locale_reference_list
 from parley.localization import localization_add, localization_list
 from parley.project_init import project_init
 from parley.translation import translate_project
-from parley.translation_memory import import_target_to_memory
+from parley.translation_batch import translate_batch_project
+from parley.translation_memory import import_lproj_dir_to_memory, import_target_to_memory
 from parley.validation import project_inspect, validate_project
 
 
@@ -74,10 +75,26 @@ def build_parser() -> argparse.ArgumentParser:
     translate.add_argument("--provider-timeout-seconds", type=int)
     translate.add_argument("--provider-request-delivery", choices=["stdin_json", "output_file"])
     translate.add_argument("--provider-response-mode", choices=["stdout_json", "stdout_json_envelope", "output_file_json"])
+    translate.add_argument("--write-order", choices=["alphabetical", "authoritative"], default="alphabetical")
     translate.add_argument("--dry-run", action="store_true")
     translate.add_argument("--no-provider", action="store_true")
     translate.add_argument("--no-context", action="store_true")
     translate.add_argument("--report-dir")
+
+    translate_batch = subparsers.add_parser("translate-batch")
+    translate_batch.add_argument("--project-root")
+    translate_batch.add_argument("--target-locale", action="append")
+    translate_batch.add_argument("--reuse-mode", choices=["tm_only", "tm_then_provider", "provider_only"], default="tm_then_provider")
+    translate_batch.add_argument("--provider")
+    translate_batch.add_argument("--provider-command")
+    translate_batch.add_argument("--provider-timeout-seconds", type=int)
+    translate_batch.add_argument("--provider-request-delivery", choices=["stdin_json", "output_file"])
+    translate_batch.add_argument("--provider-response-mode", choices=["stdout_json", "stdout_json_envelope", "output_file_json"])
+    translate_batch.add_argument("--write-order", choices=["alphabetical", "authoritative"], default="alphabetical")
+    translate_batch.add_argument("--dry-run", action="store_true")
+    translate_batch.add_argument("--no-provider", action="store_true")
+    translate_batch.add_argument("--no-context", action="store_true")
+    translate_batch.add_argument("--report-dir")
 
     tm = subparsers.add_parser("tm")
     tm_sub = tm.add_subparsers(dest="tm_command")
@@ -88,6 +105,13 @@ def build_parser() -> argparse.ArgumentParser:
     import_target.add_argument("--status", choices=["draft", "reviewed", "approved", "locked"], default="reviewed")
     import_target.add_argument("--dry-run", action="store_true")
     import_target.add_argument("--report-dir")
+    import_lproj_dir = tm_sub.add_parser("import-lproj-dir")
+    import_lproj_dir.add_argument("--project-root")
+    import_lproj_dir.add_argument("--source-root", required=True)
+    import_lproj_dir.add_argument("--status", choices=["draft", "reviewed", "approved", "locked"], default="reviewed")
+    import_lproj_dir.add_argument("--locale-map", action="append")
+    import_lproj_dir.add_argument("--dry-run", action="store_true")
+    import_lproj_dir.add_argument("--report-dir")
 
     locale = subparsers.add_parser("locale")
     locale_sub = locale.add_subparsers(dest="locale_command")
@@ -231,6 +255,7 @@ def main(argv: list[str] | None = None) -> int:
             provider_timeout_seconds=args.provider_timeout_seconds,
             provider_request_delivery=args.provider_request_delivery,
             provider_response_mode=args.provider_response_mode,
+            write_order=args.write_order,
             dry_run=args.dry_run,
             no_provider=args.no_provider,
             no_context=args.no_context,
@@ -240,6 +265,36 @@ def main(argv: list[str] | None = None) -> int:
         )
         _emit_payload_or_summary(
             command="translate",
+            result=result,
+            output_format=args.output_format,
+            quiet=args.quiet,
+        )
+        if result.message:
+            print(result.message, file=sys.stderr)
+        return result.exit_code
+    if args.command_group == "translate-batch":
+        progress_callback = None
+        if not args.quiet and args.output_format == "text":
+            progress_callback = _emit_translate_progress
+        result = translate_batch_project(
+            project_root=args.project_root,
+            target_locales=args.target_locale,
+            reuse_mode=args.reuse_mode,
+            provider=args.provider,
+            provider_command=args.provider_command,
+            provider_timeout_seconds=args.provider_timeout_seconds,
+            provider_request_delivery=args.provider_request_delivery,
+            provider_response_mode=args.provider_response_mode,
+            write_order=args.write_order,
+            dry_run=args.dry_run,
+            no_provider=args.no_provider,
+            no_context=args.no_context,
+            report_dir=args.report_dir,
+            cwd=Path.cwd(),
+            progress_callback=progress_callback,
+        )
+        _emit_payload_or_summary(
+            command="translate_batch",
             result=result,
             output_format=args.output_format,
             quiet=args.quiet,
@@ -259,6 +314,25 @@ def main(argv: list[str] | None = None) -> int:
         )
         _emit_payload_or_summary(
             command="tm_import_target",
+            result=result,
+            output_format=args.output_format,
+            quiet=args.quiet,
+        )
+        if result.message:
+            print(result.message, file=sys.stderr)
+        return result.exit_code
+    if args.command_group == "tm" and args.tm_command == "import-lproj-dir":
+        result = import_lproj_dir_to_memory(
+            project_root=args.project_root,
+            source_root=args.source_root,
+            status=args.status,
+            locale_map=args.locale_map,
+            dry_run=args.dry_run,
+            report_dir=args.report_dir,
+            cwd=Path.cwd(),
+        )
+        _emit_payload_or_summary(
+            command="tm_import_lproj_dir",
             result=result,
             output_format=args.output_format,
             quiet=args.quiet,

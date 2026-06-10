@@ -187,7 +187,9 @@ Canonical command names (MVP):
 | `parley context validate` | `context_validate` |
 | `parley validate` | `validate` |
 | `parley tm import-target` | `tm_import_target` |
+| `parley tm import-lproj-dir` | `tm_import_lproj_dir` |
 | `parley translate` | `translate` |
+| `parley translate-batch` | `translate_batch` |
 
 Minimal report envelope (MVP):
 
@@ -815,12 +817,101 @@ Report requirements (MVP):
 - The report command name MUST be `tm_import_target`.
 - The report summary MUST include `canonical_key_count`, `imported_count`, `finding_count`, `tm_written`, and `dry_run`.
 
-### 8.1 `parley translate`
+### 8.1 `parley tm import-lproj-dir`
+
+Imports an iOS `.lproj` directory corpus into translation memory and registers discovered target localizations as needed.
+
+```text
+parley tm import-lproj-dir --source-root DIR [--status draft|reviewed|approved|locked] [--locale-map LPROJ=LOCALE]... [--dry-run]
+```
+
+Options (MVP):
+
+| Option | Type | Required | Description |
+| --- | --- | --- | --- |
+| `--source-root DIR` | path | yes | Directory containing `*.lproj/Localizable.strings` files. |
+| `--status draft|reviewed|approved|locked` | enum | no | Human status assigned to imported records. Defaults to `reviewed`. |
+| `--locale-map LPROJ=LOCALE` | repeatable mapping | no | Override default locale derivation for one `.lproj` folder stem, for example `fr=fr-FR`. |
+| `--dry-run` | boolean | no | Evaluate and report import candidates without mutating inventory or translation memory. |
+
+Behavior (MVP):
+
+- The command MUST discover direct children of `--source-root` matching `*.lproj/Localizable.strings`.
+- The command MUST skip the project authoritative localization file.
+- The command MUST parse discovered `.strings` files as `ios_strings`.
+- The command MUST tolerate a UTF-8 BOM at the beginning of a `.strings` file.
+- For each non-authoritative discovered file, the command MUST derive a target locale from `--locale-map` when supplied, otherwise from a deterministic iOS `.lproj` reference mapping, otherwise from the `.lproj` folder stem.
+- The command MUST register a missing target localization inventory record for each discovered target file when the derived `(locale, path)` record is absent.
+- The command MUST update existing target localization metadata for each discovered target file when the existing record has the same stable `localization_id`.
+- The command MUST fail with a blocking finding for an immutable conflict when an existing localization record with the same stable ID has a different path, locale, or non-target role.
+- For each canonical key present in a parsed target with a matching placeholder signature, the command MUST create or update a current translation-memory record with `provenance=imported`, `human_status` equal to `--status`, and `last_translated_source_hash` equal to the current authoritative `content_hash`.
+- The command MUST mark competing current records for the same `(project_id, key, source_locale, target_locale)` as not current when it imports a record for that key.
+- The command MUST NOT mutate any localization source files under `--source-root`.
+- Missing target keys, extra target keys, placeholder mismatches, parse failures, and immutable registration conflicts MUST be reported as blocking findings and MUST NOT prevent valid matching keys from other files or other keys from being imported.
+- If `--dry-run` is true, the command MUST write the import report but MUST NOT mutate `inventory.yaml` or `translation-memory.sqlite`.
+
+Report requirements (MVP):
+
+- The report MUST be written under `<resolved --report-dir>/translation_memory/`.
+- The report command name MUST be `tm_import_lproj_dir`.
+- The report summary MUST include `discovered_count`, `target_count`, `registered_count`, `updated_count`, `imported_count`, `finding_count`, `inventory_written`, `tm_written`, and `dry_run`.
+- The report MUST include a `locale_results` array with one summary object per discovered target localization.
+
+### 8.2 `parley translate-batch`
+
+Runs `parley translate` over multiple registered target localizations and writes a roll-up report.
+
+```text
+parley translate-batch [--target-locale LOCALE]... [--reuse-mode tm_only|tm_then_provider|provider_only] [--write-order alphabetical|authoritative] [--dry-run] [--no-provider] [--no-context]
+```
+
+Options (MVP):
+
+| Option | Type | Required | Description |
+| --- | --- | --- | --- |
+| `--target-locale LOCALE` | repeatable BCP 47 string | no | Restrict the batch to one or more target locales. If omitted, select all registered target localizations. |
+| `--reuse-mode tm_only|tm_then_provider|provider_only` | enum | no | Passed through to each per-target `translate` invocation. Defaults to `tm_then_provider`. |
+| `--provider NAME` | string | no | Passed through to each per-target `translate` invocation. |
+| `--write-order alphabetical|authoritative` | enum | no | Passed through to each per-target `translate` invocation. Defaults to `alphabetical`. |
+| `--dry-run` | boolean | no | Passed through to each per-target `translate` invocation. |
+| `--no-provider` | boolean | no | Passed through to each per-target `translate` invocation. |
+| `--no-context` | boolean | no | Passed through to each per-target `translate` invocation. |
+
+Behavior (MVP):
+
+- The command MUST select registered inventory entries whose `role=target`, sorted by `(locale, path, localization_id)`.
+- If one or more `--target-locale` values are supplied, the command MUST select only targets whose normalized locale is included in that set.
+- If the resulting target set is empty, the command MUST fail with exit code `2` and MUST NOT write a report.
+- For each selected target, the command MUST invoke the single-target translation workflow with:
+  - `--target-locale` equal to the selected target record locale.
+  - `--target-path` equal to the selected target record path.
+  - `--create-target=false`.
+  - Pass-through options from the batch invocation.
+- The command MUST continue attempting later selected targets after an earlier target exits non-zero.
+- The command MUST preserve normal per-target translation reports. The batch roll-up report MUST reference those per-target report paths when reports are written.
+- `--dry-run` MUST be idempotent in the same sense as single-target translation: target files, inventory, and translation memory MUST NOT be mutated by per-target invocations.
+
+Report requirements (MVP):
+
+- The roll-up report MUST be written under `<resolved --report-dir>/translation/`.
+- The report command name MUST be `translate_batch`.
+- The report summary MUST include `target_count`, `succeeded_count`, `failed_count`, `dry_run`, and per-outcome totals aggregated from written per-target translation reports when available.
+- The report MUST include a `target_results` array with one summary object per selected target.
+
+Exit behavior (MVP):
+
+- If any selected target exits with code `4`, the batch command MUST exit `4`.
+- Otherwise, if any selected target exits with code `3`, the batch command MUST exit `3`.
+- Otherwise, if any selected target exits with code `2`, the batch command MUST exit `2`.
+- Otherwise, if any selected target exits with code `1`, the batch command MUST exit `1`.
+- Otherwise, the batch command MUST exit `0`.
+
+### 8.3 `parley translate`
 
 Translates from the project's authoritative localization into a target localization in project mode.
 
 ```text
-parley translate --target-locale LOCALE [--target-path PATH] [--create-target] [--format FORMAT] [--dry-run] [--reuse-mode tm_only|tm_then_provider|provider_only] [--no-context]
+parley translate --target-locale LOCALE [--target-path PATH] [--create-target] [--format FORMAT] [--dry-run] [--reuse-mode tm_only|tm_then_provider|provider_only] [--write-order alphabetical|authoritative] [--no-context]
 ```
 
 Project-mode requirement (MVP):
@@ -839,6 +930,7 @@ Options (MVP):
 | `--dry-run` | boolean | no | When true, MUST NOT modify any managed artifacts. Reports MUST still be written. |
 | `--reuse-mode tm_only|tm_then_provider|provider_only` | enum | no | Defaults to `tm_then_provider`. Controls whether the command may reuse translation memory and/or call a provider. |
 | `--provider NAME` | string | no | Provider profile or built-in provider ID. If omitted, use `defaults.provider` from `parley.yaml`; if no default is configured, use `dummy`. |
+| `--write-order alphabetical|authoritative` | enum | no | Defaults to `alphabetical`. Controls target localization entry ordering during write-back only. |
 | `--no-context` | boolean | no | Bypass `context-anchor.yaml` presence/population requirements for this invocation. Provider generation proceeds without project context and the translation report MUST record `context_mode=disabled`. |
 
 Preconditions (MVP):
@@ -853,6 +945,7 @@ Preconditions (MVP):
   - Built-in provider IDs `dummy` and `command-json` may be used directly.
   - Any other provider ID MUST resolve to a valid `providers.<id>` profile in `parley.yaml`.
 - The command MUST load the canonical key list/order from validated `canonical-inventory.json`; this order is the canonical-key order used for per-key evaluation and report writing.
+- Target localization write-back order is controlled separately by `--write-order` and MUST NOT alter canonical-key evaluation order or report ordering.
 - The command MUST resolve the authoritative inventory entry.
   - If there is no authoritative entry, the command MUST fail with exit code `2`.
 
@@ -978,6 +1071,7 @@ Report requirements (translation, MVP):
   - `target_locale`
   - `target_path` (the resolved target inventory entry `path`)
   - `reuse_mode`
+  - `write_order`
 - `provider_status` (plus conditional provider fields per global Provider status reporting, including `provider_diagnostics` for provider failures)
 - `context_mode`, set to `required` or `disabled`
 - `target_would_create`, `target_created`, and `target_registered`
@@ -1001,6 +1095,10 @@ Write-back rules (target localization, MVP):
 - If `--dry-run` is false:
   - The command MUST stage and atomically write a complete updated target localization file (not incremental in-place edits).
   - The command MUST NOT write the updated target localization file until after it has fully evaluated all canonical keys and prepared the translation report.
+- Target localization entry ordering during write-back MUST follow `--write-order`:
+  - `alphabetical`: write entries sorted by localization key.
+  - `authoritative`: write entries in the parser-observed key order from the authoritative localization file, with any canonical keys missing from that observed order appended in alphabetical order.
+- `--write-order` preserves entry order only. Parser adapters MAY normalize comments, whitespace, XML attribute ordering, escaping, and other format-specific presentation details during write-back.
 
 Validation of staged result (MVP):
 

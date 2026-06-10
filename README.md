@@ -151,6 +151,18 @@ PYTHONPATH=src python3 -m parley tm import-target \
 
 The import leaves target localization files unchanged. It writes reusable `imported` translation-memory records for keys whose target values exist and match the authoritative placeholder signatures.
 
+For a production iOS corpus with many sibling `.lproj` folders, bulk-register targets and seed TM from every compatible `Localizable.strings` file:
+
+```sh
+PYTHONPATH=src python3 -m parley tm import-lproj-dir \
+  --project-root "$WORKDIR" \
+  --source-root "$WORKDIR" \
+  --status approved \
+  --dry-run
+```
+
+Review the `translation_memory` report, then rerun without `--dry-run`. Use repeated `--locale-map LPROJ=LOCALE` overrides when a folder name needs a specific locale, for example `--locale-map bg=bg-BG`. This command does not rewrite any `.strings` files.
+
 Run deterministic local translation:
 
 ```sh
@@ -176,6 +188,20 @@ PYTHONPATH=src python3 -m parley translate \
 ```
 
 Add `--dry-run` to preview the creation/registration intent without writing the target file, inventory, or translation memory.
+
+By default, generated target files are written in alphabetical key order. Add `--write-order authoritative` when you want the target file to follow the key order from the authoritative localization file. This preserves entry order only; adapter write-back still normalizes comments and formatting.
+
+To run the same translation workflow over all registered targets, use `translate-batch`. Start with a dry run to inspect the per-target reports and roll-up report:
+
+```sh
+PYTHONPATH=src python3 -m parley translate-batch \
+  --project-root "$WORKDIR" \
+  --reuse-mode tm_then_provider \
+  --write-order authoritative \
+  --dry-run
+```
+
+Remove `--dry-run` to apply. Add repeated `--target-locale LOCALE` options to restrict the batch to selected targets.
 
 Named provider profiles can be stored in `parley.yaml` so real provider commands do not need to be repeated on every run:
 

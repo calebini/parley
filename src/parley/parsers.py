@@ -25,6 +25,7 @@ class ParsedEntry:
 class ParsedLocalization:
     entries: list[ParsedEntry]
     normalized_hash: str
+    entry_order: list[str]
 
 
 _IOS_PAIR_RE = re.compile(r'^\s*"((?:[^"\\]|\\.)*)"\s*=\s*"((?:[^"\\]|\\.)*)"\s*;\s*$')
@@ -42,6 +43,7 @@ def infer_format(path: str) -> str | None:
 
 
 def parse_localization(content: str, fmt: str) -> ParsedLocalization:
+    content = content.removeprefix("\ufeff")
     if fmt == "ios_strings":
         entries = _parse_ios_strings(content)
     elif fmt == "android_xml":
@@ -52,14 +54,18 @@ def parse_localization(content: str, fmt: str) -> ParsedLocalization:
         {"key": entry.key, "value": entry.value, "placeholder_signature": entry.placeholder_signature}
         for entry in sorted(entries, key=lambda item: item.key)
     ]
-    return ParsedLocalization(entries=sorted(entries, key=lambda item: item.key), normalized_hash=sha256_canonical_json(normalized))
+    return ParsedLocalization(
+        entries=sorted(entries, key=lambda item: item.key),
+        normalized_hash=sha256_canonical_json(normalized),
+        entry_order=[entry.key for entry in entries],
+    )
 
 
-def serialize_localization(entries: list[ParsedEntry], fmt: str) -> str:
+def serialize_localization(entries: list[ParsedEntry], fmt: str, *, sort_keys: bool = True) -> str:
     if fmt == "ios_strings":
-        return _serialize_ios_strings(entries)
+        return _serialize_ios_strings(entries, sort_keys=sort_keys)
     if fmt == "android_xml":
-        return _serialize_android_xml(entries)
+        return _serialize_android_xml(entries, sort_keys=sort_keys)
     raise ParserError(f"unsupported localization format: {fmt}")
 
 
@@ -89,10 +95,11 @@ def _parse_ios_strings(content: str) -> list[ParsedEntry]:
     return _ensure_unique(entries)
 
 
-def _serialize_ios_strings(entries: list[ParsedEntry]) -> str:
+def _serialize_ios_strings(entries: list[ParsedEntry], *, sort_keys: bool) -> str:
+    ordered = sorted(entries, key=lambda item: item.key) if sort_keys else entries
     lines = [
         f'"{_encode_ios_string(entry.key)}" = "{_encode_ios_string(entry.value)}";'
-        for entry in sorted(entries, key=lambda item: item.key)
+        for entry in ordered
     ]
     return "\n".join(lines) + ("\n" if lines else "")
 
@@ -116,9 +123,10 @@ def _parse_android_xml(content: str) -> list[ParsedEntry]:
     return _ensure_unique(entries)
 
 
-def _serialize_android_xml(entries: list[ParsedEntry]) -> str:
+def _serialize_android_xml(entries: list[ParsedEntry], *, sort_keys: bool) -> str:
+    ordered = sorted(entries, key=lambda item: item.key) if sort_keys else entries
     lines = ["<resources>"]
-    for entry in sorted(entries, key=lambda item: item.key):
+    for entry in ordered:
         lines.append(f'    <string name="{_encode_xml_attr(entry.key)}">{_encode_xml_text(entry.value)}</string>')
     lines.append("</resources>")
     return "\n".join(lines) + "\n"

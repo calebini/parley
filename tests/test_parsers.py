@@ -20,6 +20,7 @@ class ParserTests(unittest.TestCase):
 </resources>
 """
         parsed = parse_localization(content, "android_xml")
+        self.assertEqual(parsed.entry_order, ["cta", "greeting", "count"])
         by_key = {entry.key: entry for entry in parsed.entries}
         self.assertEqual(by_key["cta"].value, "Upgrade & keep {plan}")
         self.assertEqual(by_key["cta"].placeholder_signature, "{plan}")
@@ -37,12 +38,33 @@ class ParserTests(unittest.TestCase):
     def test_ios_strings_round_trips_escaping_and_placeholders(self) -> None:
         content = '"quote" = "Say \\"Hello\\" to %@";\n"count" = "%d tasks";\n'
         parsed = parse_localization(content, "ios_strings")
+        self.assertEqual(parsed.entry_order, ["quote", "count"])
         serialized = serialize_localization(parsed.entries, "ios_strings")
         self.assertIn('"quote" = "Say \\"Hello\\" to %@";', serialized)
         reparsed = parse_localization(serialized, "ios_strings")
         self.assertEqual(
             [(entry.key, entry.value, entry.placeholder_signature) for entry in reparsed.entries],
             [(entry.key, entry.value, entry.placeholder_signature) for entry in parsed.entries],
+        )
+
+    def test_ios_strings_tolerates_utf8_bom(self) -> None:
+        parsed = parse_localization('\ufeff"hello" = "Hello";\n', "ios_strings")
+
+        self.assertEqual([(entry.key, entry.value) for entry in parsed.entries], [("hello", "Hello")])
+
+    def test_serialize_can_preserve_input_order(self) -> None:
+        entries = [
+            ParsedEntry("z.last", "Last", []),
+            ParsedEntry("a.first", "First", []),
+        ]
+
+        self.assertEqual(
+            serialize_localization(entries, "ios_strings", sort_keys=False),
+            '"z.last" = "Last";\n"a.first" = "First";\n',
+        )
+        self.assertEqual(
+            serialize_localization(entries, "android_xml", sort_keys=False),
+            '<resources>\n    <string name="z.last">Last</string>\n    <string name="a.first">First</string>\n</resources>\n',
         )
 
     def test_duplicate_keys_are_rejected_for_ios_and_android(self) -> None:

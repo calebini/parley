@@ -151,6 +151,40 @@ class TranslateTests(unittest.TestCase):
             self.assertEqual(payload["summary"]["generated_count"], 2)
             self.assertEqual(_summary_flags(payload), (True, True, False, "dummy", "used"))
 
+    def test_translate_can_write_in_authoritative_source_order(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            init_project(root)
+            _populate_context_anchor(root)
+            target = _add_empty_target(root)
+
+            with stable_run_env("2026-05-15T14:02:00.000000Z", "2" * 32):
+                code = run_cli(
+                    [
+                        "translate",
+                        "--project-root",
+                        str(root),
+                        "--target-locale",
+                        "fr-FR",
+                        "--reuse-mode",
+                        "provider_only",
+                        "--provider",
+                        "dummy",
+                        "--write-order",
+                        "authoritative",
+                    ]
+                )
+
+            self.assertEqual(code, 0)
+            self.assertEqual(
+                target.read_text(encoding="utf-8"),
+                '"hello" = "[fr-fr] Hello %@";\n"bye" = "[fr-fr] Bye";\n',
+            )
+            report = root / "reports" / "translation" / "translate--20260515T140200000000Z-22222222222222222222222222222222.json"
+            payload = json.loads(report.read_text(encoding="utf-8"))
+            self.assertEqual(payload["inputs"]["write_order"], "authoritative")
+            self.assertEqual(payload["write_order"], "authoritative")
+
     def test_translate_provider_progress_prints_generated_counter(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -1187,6 +1221,72 @@ class TranslateTests(unittest.TestCase):
                 '"bye" = "[codex-result] Bye";\n"hello" = "[codex-result] Hello %@";\n',
             )
 
+    def test_translate_batch_dry_run_is_idempotent_and_writes_rollup(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            init_project(root)
+            fr = _add_target(root, "fr-FR", "")
+            de = _add_target(root, "de-DE", "")
+
+            before_fr = fr.read_text(encoding="utf-8")
+            before_de = de.read_text(encoding="utf-8")
+            code = run_cli(
+                [
+                    "translate-batch",
+                    "--project-root",
+                    str(root),
+                    "--reuse-mode",
+                    "provider_only",
+                    "--provider",
+                    "dummy",
+                    "--no-context",
+                    "--dry-run",
+                ]
+            )
+
+            self.assertEqual(code, 0)
+            self.assertEqual(fr.read_text(encoding="utf-8"), before_fr)
+            self.assertEqual(de.read_text(encoding="utf-8"), before_de)
+            rollup = _latest_report(root, "translate_batch")
+            payload = json.loads(rollup.read_text(encoding="utf-8"))
+            self.assertEqual(payload["summary"]["target_count"], 2)
+            self.assertEqual(payload["summary"]["succeeded_count"], 2)
+            self.assertEqual(payload["summary"]["generated_count"], 4)
+            self.assertEqual(payload["summary"]["written_target_count"], 0)
+            self.assertTrue(payload["summary"]["dry_run"])
+            self.assertEqual({item["locale"] for item in payload["target_results"]}, {"fr-fr", "de-de"})
+            self.assertTrue(all(item["report"] for item in payload["target_results"]))
+
+    def test_translate_batch_apply_writes_each_target(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            init_project(root)
+            fr = _add_target(root, "fr-FR", "")
+            de = _add_target(root, "de-DE", "")
+
+            code = run_cli(
+                [
+                    "translate-batch",
+                    "--project-root",
+                    str(root),
+                    "--reuse-mode",
+                    "provider_only",
+                    "--provider",
+                    "dummy",
+                    "--no-context",
+                    "--write-order",
+                    "authoritative",
+                ]
+            )
+
+            self.assertEqual(code, 0)
+            self.assertEqual(fr.read_text(encoding="utf-8"), '"hello" = "[fr-fr] Hello %@";\n"bye" = "[fr-fr] Bye";\n')
+            self.assertEqual(de.read_text(encoding="utf-8"), '"hello" = "[de-de] Hello %@";\n"bye" = "[de-de] Bye";\n')
+            rollup = _latest_report(root, "translate_batch")
+            payload = json.loads(rollup.read_text(encoding="utf-8"))
+            self.assertEqual(payload["summary"]["written_target_count"], 2)
+            self.assertEqual(payload["summary"]["tm_written_count"], 2)
+
 
 def _populate_context_anchor(root: Path) -> None:
     canonical = json.loads((root / "canonical-inventory.json").read_text(encoding="utf-8"))
@@ -1204,23 +1304,27 @@ def _populate_context_anchor(root: Path) -> None:
 
 
 def _add_empty_target(root: Path) -> Path:
-    target = root / "fr.lproj" / "Localizable.strings"
+    return _add_target(root, "fr-FR", "")
+
+
+def _add_target(root: Path, locale: str, content: str) -> Path:
+    folder = locale.split("-")[0].lower()
+    target = root / f"{folder}.lproj" / "Localizable.strings"
     target.parent.mkdir()
-    target.write_text("", encoding="utf-8")
-    with stable_run_env("2026-05-15T10:30:00.000000Z", "8" * 32):
-        code = run_cli(
-            [
-                "localization",
-                "add",
-                str(target),
-                "--project-root",
-                str(root),
-                "--locale",
-                "fr-FR",
-            ]
-        )
-    if code != 1:
-        raise AssertionError(f"expected empty target add to report blocking findings, got {code}")
+    target.write_text(content, encoding="utf-8")
+    code = run_cli(
+        [
+            "localization",
+            "add",
+            str(target),
+            "--project-root",
+            str(root),
+            "--locale",
+            locale,
+        ]
+    )
+    if code not in {0, 1}:
+        raise AssertionError(f"target add failed with {code}")
     return target
 
 
@@ -1301,6 +1405,13 @@ def _tm_rows(root: Path) -> list[dict]:
                 """
             )
         ]
+
+
+def _latest_report(root: Path, command: str) -> Path:
+    reports = sorted((root / "reports" / "translation").glob(f"{command}--*.json"))
+    if not reports:
+        raise AssertionError(f"no {command} report found")
+    return reports[-1]
 
 
 def _summary_flags(payload: dict) -> tuple[bool, bool, bool, str, str]:
