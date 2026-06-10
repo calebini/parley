@@ -1,76 +1,32 @@
 # Parley
 
-Parley is a project-first localization CLI for teams that want translation workflows to be repeatable, inspectable, and safe to run against real string files.
+Parley is a project-first localization CLI for teams that want translation work to be repeatable, inspectable, and safe to run against real string files.
 
-Most translation tooling treats localization as a one-off file conversion problem: send strings out, get strings back, hope the placeholders survived, and repeat the same work again later. Parley takes a different path. It turns a localization directory into a small, durable project with an authoritative source file, canonical key inventory, context anchors, translation memory, validation reports, and deterministic write-back behavior.
+It turns a localization directory into a durable project with an authoritative source file, canonical key inventory, context anchors, glossary terms, translation memory, validation reports, and deterministic write-back behavior.
 
-The result is a translation workflow that remembers what it has done, explains what changed, and gives humans and CI enough structure to trust the output.
+## What Parley Does
 
-## Why Parley Exists
+- Initializes projects from authoritative iOS `.strings` or Android XML string resources.
+- Registers target localization files and validates them against the authoritative source.
+- Imports existing human/stable translations into SQLite translation memory.
+- Bulk-imports production iOS `.lproj` corpora into project inventory and TM.
+- Translates one target or all registered targets.
+- Reuses approved/imported TM before calling a provider.
+- Supports `dummy`, `command-json`, Codex CLI, and Claude Code provider wrappers.
+- Applies glossary constraints during provider-backed translation.
+- Writes JSON reports for validation, TM import, translation, glossary, and context checks.
+- Supports dry-run workflows before mutating target files or TM.
 
-Localization gets risky when context disappears.
+## Core Concepts
 
-A short UI string like `Sync failed` can mean different things depending on product surface, user state, tone, platform convention, and surrounding copy. A placeholder like `%@` or `%d` is not decoration; if it is changed, reordered incorrectly, or dropped, the app can break. A translation that was approved last week should not be casually regenerated today just because a batch command ran again.
+- **Authoritative localization:** the source file that defines the canonical key set and placeholder signatures.
+- **Inventory:** registered localization files, their locales, roles, formats, and paths.
+- **Translation memory:** reusable target values keyed by project, source locale, target locale, key, source hash, and placeholder signature.
+- **Context anchor:** human-authored project and per-key context used for context-aware translation.
+- **Glossary:** human-authored terminology rules and preferred/prohibited target terms.
+- **Reports:** deterministic JSON artifacts that explain what was validated, imported, reused, generated, written, or skipped.
 
-Parley is built around those realities:
-
-- **Context should be durable.** Per-key context belongs in the project, not only in an ephemeral prompt.
-- **The source of truth should be explicit.** One authoritative localization drives the canonical key inventory.
-- **Validation should be structured.** Missing keys, extra keys, parser failures, placeholder mismatches, and provider failures are reported with stable categories.
-- **Translation memory should be first-class.** Generated or reviewed translations become reusable project assets.
-- **Writes should be inspectable.** Reports say whether the target file changed, whether translation memory changed, whether a provider was used, and whether a run was dry-run only.
-
-## Current MVP Capabilities
-
-Parley currently supports a local MVP workflow:
-
-- Initialize a Parley project from an authoritative localization file.
-- Track project artifacts:
-  - `parley.yaml`
-  - `inventory.yaml`
-  - `canonical-inventory.json`
-  - `context-anchor.yaml`
-  - `glossary.yaml`
-  - `translation-memory.sqlite`
-  - JSON reports under `reports/`
-- Parse, validate, translate, and reuse iOS `.strings` files in an end-to-end demo flow.
-- Parse, validate, translate, and reuse Android XML string resources in an end-to-end demo flow.
-- Add target localizations to project inventory.
-- List registered locale/file mappings.
-- List common locale-code suggestions with iOS and Android path hints.
-- Import existing target localizations into translation memory.
-- Validate targets against the canonical source:
-  - missing keys
-  - extra keys
-  - placeholder mismatches
-  - parser and IO failures
-- Scaffold blank per-key context entries during project initialization.
-- Translate via a deterministic local `dummy` provider.
-- Reuse translations from SQLite translation memory.
-- Write target localization files atomically.
-- Produce deterministic validation and translation reports.
-
-The dummy provider is intentionally boring. It exists so the full workflow can be tested without production strings, external APIs, credentials, network access, or cost.
-
-## The Workflow
-
-Parley’s happy path looks like this:
-
-```text
-project init
-  -> fill context-anchor.yaml
-  -> localization add
-  -> tm import-target
-  -> translate
-  -> validate
-  -> translate again with TM reuse
-```
-
-That loop is the heart of the tool. The first translation can generate target strings. Later runs can reuse translation memory instead of regenerating work that is already known.
-
-## Quick Start
-
-From the repository root:
+## Install For Local Development
 
 ```sh
 python3 -m venv .venv
@@ -78,132 +34,79 @@ python3 -m venv .venv
 pip install -e .
 ```
 
-Run the test suite:
+Run tests:
 
 ```sh
 PYTHONPATH=src python3 -m unittest discover -s tests
 ```
 
-Try the synthetic iOS demo:
+## Common Workflows
 
-```sh
-WORKDIR="$(mktemp -d /private/tmp/parley-ios-demo.XXXXXX)"
-cp -R examples/ios-demo/. "$WORKDIR/"
-```
-
-Initialize the project:
+### Start A New Project
 
 ```sh
 PYTHONPATH=src python3 -m parley project init \
-  --project-root "$WORKDIR" \
-  --name "Pocket Tasks" \
-  --authoritative "$WORKDIR/en.lproj/Localizable.strings" \
+  --project-root "/path/to/App/parley" \
+  --name "My App" \
+  --authoritative "/path/to/App/en.lproj/Localizable.strings" \
   --locale en-US
 ```
 
-If you want Parley artifacts kept out of the app localization tree, initialize a sibling artifact folder instead:
+This keeps Parley artifacts under `/path/to/App/parley` while inventory paths still point at localization files under `/path/to/App`.
 
-```sh
-PYTHONPATH=src python3 -m parley project init \
-  --project-root "$WORKDIR/parley" \
-  --name "Pocket Tasks" \
-  --authoritative "$WORKDIR/en.lproj/Localizable.strings" \
-  --locale en-US
-```
+### Import An Existing iOS Corpus
 
-In that layout, Parley writes reports, inventory, glossary, context, and translation memory under `$WORKDIR/parley`, while inventory paths still refer to localization files such as `en.lproj/Localizable.strings` under `$WORKDIR`.
-
-Context:
-
-`project init` scaffolds `context-anchor.yaml` with one blank context entry for every canonical key. For production translation, replace those blank values with real product/context descriptions. This synthetic quick start uses `--no-context` below to exercise the literal/dummy-provider path without pretending blank context is meaningful.
-
-Check context readiness:
-
-```sh
-PYTHONPATH=src python3 -m parley context validate \
-  --project-root "$WORKDIR"
-```
-
-Freshly initialized projects should report blank context findings until `context-anchor.yaml` is populated.
-
-Create and add an empty French target:
-
-```sh
-mkdir -p "$WORKDIR/fr-generated.lproj"
-: > "$WORKDIR/fr-generated.lproj/Localizable.strings"
-
-PYTHONPATH=src python3 -m parley localization add \
-  "$WORKDIR/fr-generated.lproj/Localizable.strings" \
-  --project-root "$WORKDIR" \
-  --locale fr-FR
-```
-
-The empty target should report blocking validation findings. That is expected; translation fills it next.
-
-For existing, stable target localizations, import their current values into translation memory before relying on TM reuse:
-
-```sh
-PYTHONPATH=src python3 -m parley tm import-target \
-  --project-root "$WORKDIR" \
-  --target-locale fr-FR \
-  --status reviewed
-```
-
-The import leaves target localization files unchanged. It writes reusable `imported` translation-memory records for keys whose target values exist and match the authoritative placeholder signatures.
-
-For a production iOS corpus with many sibling `.lproj` folders, bulk-register targets and seed TM from every compatible `Localizable.strings` file:
+For a production directory with many sibling `.lproj` folders:
 
 ```sh
 PYTHONPATH=src python3 -m parley tm import-lproj-dir \
-  --project-root "$WORKDIR" \
-  --source-root "$WORKDIR" \
+  --project-root "/path/to/App/parley" \
+  --source-root "/path/to/App" \
   --status approved \
   --dry-run
 ```
 
-Review the `translation_memory` report, then rerun without `--dry-run`. Use repeated `--locale-map LPROJ=LOCALE` overrides when a folder name needs a specific locale, for example `--locale-map bg=bg-BG`. This command does not rewrite any `.strings` files.
+Review the `translation_memory` report, add any needed `--locale-map LPROJ=LOCALE` overrides, then rerun without `--dry-run`. The command registers targets and imports compatible existing strings into TM without rewriting any `.strings` files.
 
-Run deterministic local translation:
+### Translate One Locale
 
 ```sh
 PYTHONPATH=src python3 -m parley translate \
-  --project-root "$WORKDIR" \
+  --project-root "/path/to/App/parley" \
   --target-locale fr-FR \
-  --reuse-mode provider_only \
-  --provider dummy \
-  --no-context
-```
-
-For a new target locale that is not registered yet, translate can create and register the target when given an explicit path:
-
-```sh
-PYTHONPATH=src python3 -m parley translate \
-  --project-root "$WORKDIR" \
-  --target-locale de-DE \
-  --target-path "$WORKDIR/de.lproj/Localizable.strings" \
-  --create-target \
-  --reuse-mode provider_only \
-  --provider dummy \
-  --no-context
-```
-
-Add `--dry-run` to preview the creation/registration intent without writing the target file, inventory, or translation memory.
-
-By default, generated target files are written in alphabetical key order. Add `--write-order authoritative` when you want the target file to follow the key order from the authoritative localization file. This preserves entry order only; adapter write-back still normalizes comments and formatting.
-
-To run the same translation workflow over all registered targets, use `translate-batch`. Start with a dry run to inspect the per-target reports and roll-up report:
-
-```sh
-PYTHONPATH=src python3 -m parley translate-batch \
-  --project-root "$WORKDIR" \
+  --target-path "/path/to/App/fr.lproj/Localizable.strings" \
   --reuse-mode tm_then_provider \
   --write-order authoritative \
   --dry-run
 ```
 
-Remove `--dry-run` to apply. Add repeated `--target-locale LOCALE` options to restrict the batch to selected targets.
+Remove `--dry-run` after reviewing the report.
 
-Named provider profiles can be stored in `parley.yaml` so real provider commands do not need to be repeated on every run:
+### Translate All Registered Targets
+
+```sh
+PYTHONPATH=src python3 -m parley translate-batch \
+  --project-root "/path/to/App/parley" \
+  --reuse-mode tm_then_provider \
+  --write-order authoritative \
+  --dry-run
+```
+
+Batch translation writes normal per-target translation reports plus one `translate_batch` roll-up report. Add repeated `--target-locale LOCALE` flags to restrict a run.
+
+### Validate Targets
+
+```sh
+PYTHONPATH=src python3 -m parley validate \
+  --project-root "/path/to/App/parley" \
+  --no-authoritative
+```
+
+Validation reports missing keys, extra keys, placeholder mismatches, parse errors, IO errors, and glossary findings.
+
+## Provider Configuration
+
+Provider profiles live in `parley.yaml`:
 
 ```yaml
 defaults:
@@ -212,170 +115,35 @@ defaults:
 providers:
   codex:
     type: command-json
-    command: /path/to/codex_parley_provider.py
+    command: /path/to/scripts/codex_parley_provider.py
     timeout_seconds: 180
     request_delivery: stdin_json
     response_mode: stdout_json
 ```
 
-With `defaults.provider` set, `translate` can omit `--provider` and still use the configured profile. An explicit `--provider NAME` overrides the default.
-
-Claude Code can be wired through the same command-json provider boundary:
+Claude Code uses the same `command-json` boundary:
 
 ```yaml
-defaults:
-  provider: claude
-  report_format: "json"
 providers:
   claude:
     type: command-json
-    command: /path/to/claude_parley_provider.py
+    command: /path/to/scripts/claude_parley_provider.py
     timeout_seconds: 180
     request_delivery: stdin_json
     response_mode: stdout_json
 ```
 
-Validate the generated target:
-
-```sh
-PYTHONPATH=src python3 -m parley validate \
-  --project-root "$WORKDIR" \
-  --no-authoritative
-```
-
-Verify translation-memory reuse:
-
-```sh
-: > "$WORKDIR/fr-generated.lproj/Localizable.strings"
-
-PYTHONPATH=src python3 -m parley translate \
-  --project-root "$WORKDIR" \
-  --target-locale fr-FR \
-  --reuse-mode tm_only
-```
-
-The second translate should refill the target from `translation-memory.sqlite` without provider work.
-
-The same project workflow is also covered by `examples/android-demo`, which exercises Android XML parsing, XML escaping, placeholder preservation, validation, translation write-back, and translation-memory reuse.
-
-## Reports You Can Trust
-
-Parley writes JSON reports so humans and CI can inspect what happened.
-
-Translation reports include summary fields such as:
-
-```json
-{
-  "generated_count": 8,
-  "reused_count": 0,
-  "written_target": true,
-  "tm_written": true,
-  "dry_run": false,
-  "provider_id": "dummy",
-  "provider_status": "used"
-}
-```
-
-For a follow-up translation-memory-only run, the same report surface shows reuse clearly:
-
-```json
-{
-  "generated_count": 0,
-  "reused_count": 8,
-  "written_target": true,
-  "tm_written": true,
-  "dry_run": false,
-  "provider_id": "dummy",
-  "provider_status": "not_applicable"
-}
-```
-
-This is the difference between “the command exited 0” and “we know exactly what changed.”
-
-When a provider-backed translation fails, the translation report records `provider_status: "failed"`, a specific `provider_failure_category` such as `provider_process_failed` or `provider_timeout`, and a bounded `provider_diagnostics` object. For command-backed providers, diagnostics include process telemetry such as exit code, duration, timeout state, and stdout/stderr tails without echoing the provider request payload.
-
-## Project Artifacts
-
-A Parley project is a directory with durable localization state:
-
-```text
-parley.yaml
-inventory.yaml
-canonical-inventory.json
-context-anchor.yaml
-glossary.yaml
-translation-memory.sqlite
-reports/
-```
-
-The authoritative localization defines the canonical key set. Target localizations are validated against that baseline. Translation memory stores reusable target values keyed by project, source locale, target locale, canonical key, source hash, and placeholder signature.
-
-## Design Principles
-
-### Project-first, not file-first
-
-The MVP intentionally centers project mode. Direct file-to-file translation is deferred because it lacks durable context, inventory, report rooting, and translation memory continuity.
-
-### Context is an artifact
-
-Parley treats context as something worth storing and reviewing. `project init` creates blank per-key context slots in `context-anchor.yaml`; humans or future provider-backed context generation should fill those slots with meaningful descriptions before translation.
-
-`parley context validate` checks that every canonical key has populated context and flags stale context entries left behind after source-string changes.
-
-When context is unavailable or inappropriate for a literal pass, `parley translate --no-context` bypasses the populated-context precondition and records `context_mode: disabled` in the translation report.
-
-### Translation memory is a quality asset
-
-TM is not just a cache. It is where generated, reviewed, imported, and eventually human-approved translations can become durable candidates for reuse.
-
-### Reports are part of the product
-
-Every serious localization workflow needs auditability. Parley’s reports are designed to answer practical operator questions: what failed, what changed, what was reused, whether provider work happened, and whether write-back occurred.
-
-### Local first
-
-The current MVP runs entirely locally with no external dependencies. External provider integrations should fit behind provider interfaces without changing the core workflow.
-
-## What Is Still Coming
-
-Parley is early. The current implementation proves the project workflow and local translation loop. Upcoming areas include:
-
-- Real provider adapters.
-- Rich context generation.
-- Human review and approval commands.
-- Richer Android XML fixtures and edge-case coverage.
-- Glossary enforcement.
-- Confidence scoring and review evidence.
-- Import/export for translation memory.
-- Better packaging and terminal UX.
+See [Provider CLI Adapters](docs/PROVIDER_CLI_ADAPTERS.md) for details.
 
 ## Documentation
 
-- [CLI MVP Walkthrough](docs/CLI_MVP_WALKTHROUGH.md)
-- [Implementation Plan](docs/IMPLEMENTATION_PLAN.md)
+- [User Guide](docs/USER_GUIDE.md)
+- [Production iOS Corpus Workflow](docs/PRODUCTION_IOS_CORPUS_WORKFLOW.md)
+- [CLI Demo Walkthrough](docs/CLI_MVP_WALKTHROUGH.md)
+- [Provider CLI Adapters](docs/PROVIDER_CLI_ADAPTERS.md)
 - [High-Level Architecture](docs/hld-architecture.md)
 - [Specification Index](docs/specs/00-spec-index.md)
 
-## Development
-
-Run all tests:
-
-```sh
-PYTHONPATH=src python3 -m unittest discover -s tests
-```
-
-Inspect the CLI:
-
-```sh
-PYTHONPATH=src python3 -m parley --help
-PYTHONPATH=src python3 -m parley locale list --query german
-PYTHONPATH=src python3 -m parley localization list --help
-PYTHONPATH=src python3 -m parley glossary init --help
-PYTHONPATH=src python3 -m parley glossary init --with-example --help
-PYTHONPATH=src python3 -m parley translate --help
-PYTHONPATH=src python3 -m parley tm import-target --help
-```
-
 ## Status
 
-Parley is an MVP implementation under active development. The current emphasis is correctness, deterministic artifacts, and a coherent project workflow before adding real external translation providers.
+Parley is an active MVP. The current implementation is usable for project-mode localization workflows with local artifacts, TM reuse, glossary enforcement, and command-backed providers. The next frontier is better packaging, review/approval ergonomics, richer provider quality checks, and broader format coverage.

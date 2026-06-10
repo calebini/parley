@@ -1,15 +1,15 @@
-# Parley CLI MVP Walkthrough
+# CLI Demo Walkthrough
 
-This walkthrough uses synthetic iOS strings from `examples/ios-demo`. It does not use production strings or external providers.
+This walkthrough uses synthetic iOS strings from `examples/ios-demo`. It is safe for local smoke testing and does not require external providers.
 
-Run from the repository root:
+For production usage, start with [User Guide](USER_GUIDE.md) or [Production iOS Corpus Workflow](PRODUCTION_IOS_CORPUS_WORKFLOW.md).
+
+## 1. Create A Temporary Demo Project
 
 ```sh
 WORKDIR="$(mktemp -d /private/tmp/parley-ios-demo.XXXXXX)"
 cp -R examples/ios-demo/. "$WORKDIR/"
 ```
-
-Initialize a Parley project:
 
 ```sh
 PYTHONPATH=src python3 -m parley project init \
@@ -19,11 +19,16 @@ PYTHONPATH=src python3 -m parley project init \
   --locale en-US
 ```
 
-Context for local MVP testing:
+## 2. Check Blank Context
 
-`project init` scaffolds `context-anchor.yaml` with one blank context entry for every canonical key. For context-aware translation, replace those blank values with meaningful product/context descriptions. This walkthrough uses `--no-context` below to exercise the literal/dummy-provider path.
+```sh
+PYTHONPATH=src python3 -m parley context validate \
+  --project-root "$WORKDIR"
+```
 
-Create and add an empty target localization:
+Fresh projects have blank per-key context entries. This demo uses `--no-context` during translation to exercise the literal provider path.
+
+## 3. Add An Empty Target
 
 ```sh
 mkdir -p "$WORKDIR/fr-generated.lproj"
@@ -35,18 +40,9 @@ PYTHONPATH=src python3 -m parley localization add \
   --locale fr-FR
 ```
 
-The empty target reports blocking validation findings because required keys are missing. That is expected; translation fills the target next.
+The empty target should report missing-key findings. Translation fills it next.
 
-For existing target files with stable translations, import them into translation memory:
-
-```sh
-PYTHONPATH=src python3 -m parley tm import-target \
-  --project-root "$WORKDIR" \
-  --target-locale fr-FR \
-  --status reviewed
-```
-
-Run deterministic dummy translation:
+## 4. Translate With The Dummy Provider
 
 ```sh
 PYTHONPATH=src python3 -m parley translate \
@@ -57,7 +53,7 @@ PYTHONPATH=src python3 -m parley translate \
   --no-context
 ```
 
-Validate the generated target:
+Validate:
 
 ```sh
 PYTHONPATH=src python3 -m parley validate \
@@ -65,51 +61,53 @@ PYTHONPATH=src python3 -m parley validate \
   --no-authoritative
 ```
 
-Verify translation-memory reuse:
+## 5. Verify TM Reuse
+
+Clear the target file:
 
 ```sh
 : > "$WORKDIR/fr-generated.lproj/Localizable.strings"
+```
 
+Refill from TM only:
+
+```sh
 PYTHONPATH=src python3 -m parley translate \
   --project-root "$WORKDIR" \
   --target-locale fr-FR \
-  --reuse-mode tm_only
+  --reuse-mode tm_only \
+  --no-context
 ```
 
-The second translate should reuse all generated entries from `translation-memory.sqlite` without provider work.
+The report should show `reused_count` equal to the key count and `provider_status: "not_applicable"`.
 
-## Translation Report Checks
+## 6. Try Batch Translation
 
-Translation reports are written under:
+Create another empty target:
+
+```sh
+mkdir -p "$WORKDIR/de-generated.lproj"
+: > "$WORKDIR/de-generated.lproj/Localizable.strings"
+
+PYTHONPATH=src python3 -m parley localization add \
+  "$WORKDIR/de-generated.lproj/Localizable.strings" \
+  --project-root "$WORKDIR" \
+  --locale de-DE
+```
+
+Dry-run all registered targets:
+
+```sh
+PYTHONPATH=src python3 -m parley translate-batch \
+  --project-root "$WORKDIR" \
+  --reuse-mode provider_only \
+  --provider dummy \
+  --no-context \
+  --dry-run
+```
+
+Review the per-target reports and the `translate_batch` roll-up report under:
 
 ```text
 $WORKDIR/reports/translation/
-```
-
-For the dummy-provider run, the report summary should show:
-
-```json
-{
-  "generated_count": 8,
-  "reused_count": 0,
-  "written_target": true,
-  "tm_written": true,
-  "dry_run": false,
-  "provider_id": "dummy",
-  "provider_status": "used"
-}
-```
-
-For the follow-up `tm_only` run, the report summary should show:
-
-```json
-{
-  "generated_count": 0,
-  "reused_count": 8,
-  "written_target": true,
-  "tm_written": true,
-  "dry_run": false,
-  "provider_id": "dummy",
-  "provider_status": "not_applicable"
-}
 ```

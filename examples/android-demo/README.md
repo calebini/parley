@@ -5,6 +5,37 @@ Synthetic Android XML localization fixtures for Parley dry runs. These are fake 
 Files:
 
 - `values/strings.xml`: authoritative source strings.
-- `values-fr/strings.xml`: empty target fixture used by the end-to-end smoke test.
+- `values-fr/strings.xml`: empty target fixture used by smoke tests.
 
-The fixture is intentionally small but includes Android-style `%1$s`, printf-style `%d`, brace placeholders, and XML escaping.
+The fixture includes Android-style `%1$s`, printf-style `%d`, brace placeholders, and XML escaping.
+
+Minimal flow:
+
+```sh
+WORKDIR="$(mktemp -d /private/tmp/parley-android-demo.XXXXXX)"
+cp -R examples/android-demo/. "$WORKDIR/"
+
+PYTHONPATH=src python3 -m parley project init \
+  --project-root "$WORKDIR" \
+  --name "Pocket Tasks Android" \
+  --authoritative "$WORKDIR/values/strings.xml" \
+  --locale en-US \
+  --format android_xml
+
+PYTHONPATH=src python3 -m parley localization add \
+  "$WORKDIR/values-fr/strings.xml" \
+  --project-root "$WORKDIR" \
+  --locale fr-FR \
+  --format android_xml
+```
+
+Translate with the dummy provider:
+
+```sh
+PYTHONPATH=src python3 -m parley translate \
+  --project-root "$WORKDIR" \
+  --target-locale fr-FR \
+  --reuse-mode provider_only \
+  --provider dummy \
+  --no-context
+```

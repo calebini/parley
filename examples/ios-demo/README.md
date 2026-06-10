@@ -1,19 +1,43 @@
 # iOS Demo Strings
 
-Synthetic localization fixtures for Parley dry runs. These are intentionally fake product strings and safe to commit.
+Synthetic localization fixtures for Parley dry runs. These are fake product strings and safe to commit.
 
 Files:
 
 - `en.lproj/Localizable.strings`: authoritative source strings.
-- `fr-clean.lproj/Localizable.strings`: target strings with matching keys and placeholders.
-- `fr-broken.lproj/Localizable.strings`: target strings with a missing key, an extra key, and placeholder mismatches.
+- `fr-clean.lproj/Localizable.strings`: complete target strings with matching keys and placeholders.
+- `fr-broken.lproj/Localizable.strings`: target strings with missing keys, an extra key, and placeholder mismatches.
 
-Suggested dry-run flow:
+Suggested flow:
 
-1. Copy this directory to a temporary project root.
-2. Run `parley project init` with `en.lproj/Localizable.strings` as the authoritative localization.
-3. Fill the blank per-key entries in `context-anchor.yaml` with local dry-run context.
-4. Add an empty target localization.
-5. Run `parley translate --target-locale fr-FR --reuse-mode provider_only --provider dummy`.
-6. Run `parley validate --no-authoritative`.
-7. Clear the target file and run `parley translate --target-locale fr-FR --reuse-mode tm_only` to verify translation-memory reuse.
+```sh
+WORKDIR="$(mktemp -d /private/tmp/parley-ios-demo.XXXXXX)"
+cp -R examples/ios-demo/. "$WORKDIR/"
+
+PYTHONPATH=src python3 -m parley project init \
+  --project-root "$WORKDIR" \
+  --name "Pocket Tasks" \
+  --authoritative "$WORKDIR/en.lproj/Localizable.strings" \
+  --locale en-US
+```
+
+Add an empty target and translate with the dummy provider:
+
+```sh
+mkdir -p "$WORKDIR/fr-generated.lproj"
+: > "$WORKDIR/fr-generated.lproj/Localizable.strings"
+
+PYTHONPATH=src python3 -m parley localization add \
+  "$WORKDIR/fr-generated.lproj/Localizable.strings" \
+  --project-root "$WORKDIR" \
+  --locale fr-FR
+
+PYTHONPATH=src python3 -m parley translate \
+  --project-root "$WORKDIR" \
+  --target-locale fr-FR \
+  --reuse-mode provider_only \
+  --provider dummy \
+  --no-context
+```
+
+For a fuller walkthrough, see `docs/CLI_MVP_WALKTHROUGH.md`.

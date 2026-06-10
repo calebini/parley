@@ -1,127 +1,144 @@
-# Provider CLI Adapter Notes
+# Provider CLI Adapters
 
-Parley's first real-provider path uses the generic `command-json` provider. The provider command is responsible for reading a Parley provider request and returning a schema-valid Parley provider response.
+Parley uses a generic `command-json` provider boundary for local LLM CLIs and other provider commands.
 
-For now, keep real LLM provider work behind explicit operator configuration and test it only with dummy/demo strings.
+The provider command receives a Parley translation request and returns a schema-valid Parley translation response. Parley owns TM reuse, glossary resolution, placeholder validation, reports, and write-back. The provider owns only the generated translation text for requested entries.
 
-## Current Supported Modes
+## Built-In Provider IDs
 
-The implemented command-backed provider supports:
+- `dummy`: deterministic local provider for tests and demos.
+- `command-json`: generic command-backed provider.
 
-- `--provider command-json`
-- `--provider-command <executable>`
-- `--provider-request-delivery stdin_json`
-- `--provider-request-delivery output_file`
-- `--provider-response-mode stdout_json`
-- `--provider-response-mode stdout_json_envelope`
-- `--provider-response-mode output_file_json`
+Named provider profiles are configured in `parley.yaml`.
 
-The default transport is `stdin_json` request delivery plus `stdout_json` response parsing.
+## Recommended Project Configuration
 
-## Project-Level Provider Config
-
-For repeatable local projects, prefer a named provider in `parley.yaml`:
+Codex:
 
 ```yaml
+defaults:
+  provider: codex
+  report_format: "json"
 providers:
-  codex-local:
-    command: "./scripts/codex_parley_provider.py"
-    request_delivery: "stdin_json"
-    response_mode: "stdout_json"
+  codex:
+    type: command-json
+    command: /path/to/parley/scripts/codex_parley_provider.py
     timeout_seconds: 180
-    type: "command-json"
+    request_delivery: stdin_json
+    response_mode: stdout_json
 ```
 
-Then run:
+Claude Code:
 
-```text
+```yaml
+defaults:
+  provider: claude
+  report_format: "json"
+providers:
+  claude:
+    type: command-json
+    command: /path/to/parley/scripts/claude_parley_provider.py
+    timeout_seconds: 180
+    request_delivery: stdin_json
+    response_mode: stdout_json
+```
+
+With `defaults.provider` configured, translation commands can omit `--provider`.
+
+## Single Target Translation
+
+```sh
 PYTHONPATH=src python3 -m parley translate \
-  --project-root <demo-project> \
+  --project-root "/path/to/App/parley" \
   --target-locale fr-FR \
-  --reuse-mode provider_only \
-  --provider codex-local
+  --target-path "/path/to/App/fr.lproj/Localizable.strings" \
+  --reuse-mode tm_then_provider \
+  --write-order authoritative \
+  --dry-run
 ```
 
-Named provider IDs are project-local. `dummy` and `command-json` are reserved built-ins. Provider commands execute with the Parley project root as their working directory, so relative commands should point to project-local scripts; otherwise use an absolute path. The low-level flags (`--provider-command`, `--provider-request-delivery`, `--provider-response-mode`, and `--provider-timeout-seconds`) remain available for direct smoke tests and can override the named provider config when supplied.
+Remove `--dry-run` to apply.
 
-## Codex-Shaped Envelope
+## Batch Translation
 
-For Codex-like command wrappers, prefer:
-
-```text
---provider command-json
---provider-request-delivery stdin_json
---provider-response-mode stdout_json_envelope
---provider-timeout-seconds 120
+```sh
+PYTHONPATH=src python3 -m parley translate-batch \
+  --project-root "/path/to/App/parley" \
+  --reuse-mode tm_then_provider \
+  --write-order authoritative \
+  --dry-run
 ```
 
-`stdout_json_envelope` accepts either:
+Batch translation uses the same provider profile for each selected target and writes both per-target translation reports and a roll-up report.
 
-- a top-level `structured_output` object containing the Parley provider response, or
-- a top-level `result` string containing the Parley provider response as JSON text.
+## Direct Command-JSON Smoke
 
-This matches the envelope shapes used by fake Codex-shaped smoke tests without requiring the real Codex CLI yet.
+You can bypass named provider config for a quick smoke:
 
-## Local Codex Wrapper Smoke
-
-The repo includes an experimental local wrapper:
-
-```text
-scripts/codex_parley_provider.py
-```
-
-Use it only with dummy/demo strings while the provider surface is still settling:
-
-```text
+```sh
 PYTHONPATH=src python3 -m parley translate \
-  --project-root <demo-project> \
+  --project-root "/path/to/demo-project" \
   --target-locale fr-FR \
   --reuse-mode provider_only \
   --provider command-json \
   --provider-command ./scripts/codex_parley_provider.py \
+  --provider-request-delivery stdin_json \
   --provider-response-mode stdout_json \
-  --provider-timeout-seconds 180
+  --provider-timeout-seconds 180 \
+  --no-context \
+  --dry-run
 ```
 
-The wrapper reads Parley's provider request, calls `codex exec` with a strict Parley provider-response schema, and prints the resulting JSON response for the generic `command-json` adapter to validate.
+## Supported Transport Modes
 
-Environment knobs:
+Request delivery:
+
+- `stdin_json`: provider request JSON is written to stdin.
+- `output_file`: provider request JSON is written to `PARLEY_REQUEST_PATH`.
+
+Response modes:
+
+- `stdout_json`: provider prints the Parley provider response JSON to stdout.
+- `stdout_json_envelope`: provider prints a wrapper object containing either `structured_output` or a JSON string in `result`.
+- `output_file_json`: provider writes response JSON to `PARLEY_RESPONSE_PATH`.
+
+The default named-profile transport is `stdin_json` plus `stdout_json`.
+
+## Provider Diagnostics
+
+When provider-backed translation fails, the translation report records:
+
+- `provider_status`
+- `provider_failure_category`
+- bounded `provider_diagnostics`
+
+For command-backed providers, diagnostics include process telemetry such as exit code, duration, timeout state, and stdout/stderr tails. Parley does not echo the full provider request payload into normal diagnostics.
+
+## Wrapper Scripts
+
+The repository includes:
+
+- `scripts/codex_parley_provider.py`
+- `scripts/claude_parley_provider.py`
+- `scripts/smoke_codex_provider.sh`
+
+The wrappers are intentionally thin. They adapt Codex/Claude CLI output into Parley's provider response schema.
+
+Codex environment knobs:
 
 - `PARLEY_CODEX_COMMAND`: defaults to `codex`
 - `PARLEY_CODEX_TIMEOUT_SECONDS`: defaults to `120`
 
-To run the full manual smoke against synthetic strings:
+To run the opt-in Codex smoke against synthetic strings:
 
-```text
+```sh
 PARLEY_RUN_CODEX_SMOKE=1 scripts/smoke_codex_provider.sh
 ```
 
-This smoke creates a temporary project, initializes Parley artifacts, asks Codex to translate one dummy string, verifies placeholder preservation, verifies target write-back, and verifies translation-memory write-back. It is intentionally opt-in because it may use local Codex credentials and network access.
+## Safety Notes
 
-## File-Backed Transport
-
-For CLIs that need file paths instead of stdin/stdout JSON:
-
-```text
---provider command-json
---provider-request-delivery output_file
---provider-response-mode output_file_json
-```
-
-Parley sets:
-
-- `PARLEY_REQUEST_PATH`
-- `PARLEY_RESPONSE_PATH`
-
-Transport files are written under `.parley/provider-io/` and cleaned up after the adapter reads the result. They are not durable Parley artifacts.
-
-## Deferred
-
-Still deferred:
-
-- real `codex-cli` named provider wrapper
-- real `claude-cli` named provider wrapper
-- hosted API providers
-- production-string smoke tests
-- retry/backoff policy
-- interactive auth flows
+- Start with `--dry-run`.
+- Use demo strings first when testing a new provider profile.
+- Keep provider commands explicit in `parley.yaml`.
+- Use `tm_then_provider` for production projects so approved/imported TM is reused before provider generation.
+- Use `--no-provider` when you want to verify which keys would need provider work without making calls.

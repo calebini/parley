@@ -347,7 +347,7 @@ Example:
 
 ```yaml
 schema_version: "1.0"
-project_id: hidapprove
+project_id: exampleapp
 glossary_version: product-2026-06
 terms:
   - id: access-token
@@ -366,8 +366,8 @@ terms:
     forbidden:
       fr-fr:
         - token d'acces
-  - id: hid-approve
-    source: HID Approve
+  - id: exampleapp
+    source: ExampleApp
     protected: true
     untranslated: true
 ```
