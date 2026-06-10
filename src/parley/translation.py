@@ -39,7 +39,7 @@ def translate_project(
     create_target: bool,
     target_format: str | None,
     reuse_mode: str,
-    provider: str,
+    provider: str | None,
     dry_run: bool,
     no_provider: bool,
     no_context: bool,
@@ -69,6 +69,7 @@ def translate_project(
         artifacts = load_project_artifacts(root, include_canonical=True, include_context=not no_context)
         assert artifacts.canonical_inventory is not None
         canonical = artifacts.canonical_inventory
+        provider_id = _effective_provider_id(artifacts.manifest, provider)
         if not no_context:
             _ensure_populated_context_anchor(artifacts.context_anchor, canonical)
         authoritative = _authoritative_record(artifacts.inventory, artifacts.manifest)
@@ -113,7 +114,7 @@ def translate_project(
             target_registered=False,
             no_provider=no_provider,
             no_context=no_context,
-            provider=provider,
+            provider=provider_id,
             message=str(exc),
         )
     except ParleyError as exc:
@@ -137,7 +138,7 @@ def translate_project(
             target_registered=False,
             no_provider=no_provider,
             no_context=no_context,
-            provider=provider,
+            provider=provider_id,
             message=str(exc),
         )
 
@@ -170,7 +171,7 @@ def translate_project(
                 target_registered=False,
                 no_provider=no_provider,
                 no_context=no_context,
-                provider=provider,
+                provider=provider_id,
                 message=str(exc),
             )
         except ParleyError as exc:
@@ -194,7 +195,7 @@ def translate_project(
                 target_registered=False,
                 no_provider=no_provider,
                 no_context=no_context,
-                provider=provider,
+                provider=provider_id,
                 message=str(exc),
             )
 
@@ -226,7 +227,7 @@ def translate_project(
             target_registered=False,
             no_provider=no_provider,
             no_context=no_context,
-            provider=provider,
+            provider=provider_id,
         )
 
     try:
@@ -265,7 +266,7 @@ def translate_project(
             target_registered=False,
             no_provider=no_provider,
             no_context=no_context,
-            provider=provider,
+            provider=provider_id,
         )
     except sqlite3.DatabaseError as exc:
         return CommandResult(EXIT_USAGE_OR_SCHEMA, [], f"invalid translation-memory.sqlite: {exc}")
@@ -274,6 +275,7 @@ def translate_project(
     provider_status = "not_applicable" if reuse_mode == "tm_only" else "skipped"
     provider_skip_reason = None if reuse_mode == "tm_only" else "not_needed"
     provider_failure_category = None
+    provider_diagnostics = None
     if provider_required:
         if no_provider:
             outcomes = [
@@ -288,7 +290,7 @@ def translate_project(
             try:
                 resolved_provider = _resolve_provider_config(
                     manifest=artifacts.manifest,
-                    provider=provider,
+                    provider=provider_id,
                     provider_command=provider_command,
                     provider_timeout_seconds=provider_timeout_seconds,
                     provider_request_delivery=provider_request_delivery,
@@ -325,6 +327,10 @@ def translate_project(
                 provider_status = "failed"
                 provider_skip_reason = None
                 provider_failure_category = exc.classification
+                provider_diagnostics = exc.diagnostics or {
+                    "classification": exc.classification,
+                    "message": str(exc),
+                }
             except ProviderConfigurationError as exc:
                 outcomes = [
                     _replace_generated(item, "provider_disallowed")
@@ -335,6 +341,10 @@ def translate_project(
                 provider_status = "skipped"
                 provider_skip_reason = "invalid_configuration"
                 provider_failure_category = "invalid_configuration"
+                provider_diagnostics = exc.diagnostics or {
+                    "classification": "invalid_configuration",
+                    "message": str(exc),
+                }
             except Exception:
                 outcomes = _mark_provider_unavailable(outcomes)
                 exit_code = EXIT_PROVIDER
@@ -342,6 +352,10 @@ def translate_project(
                 provider_status = "failed"
                 provider_skip_reason = None
                 provider_failure_category = "provider_unavailable"
+                provider_diagnostics = {
+                    "classification": "provider_unavailable",
+                    "message": "unexpected provider failure",
+                }
     elif any(item["outcome"] == "failed" for item in outcomes):
         exit_code = EXIT_BLOCKING_FINDINGS
         failure_category = None
@@ -411,10 +425,11 @@ def translate_project(
         target_registered=target_registered,
         no_provider=no_provider,
         no_context=no_context,
-        provider=provider,
+        provider=provider_id,
         files=files,
         provider_skip_reason=provider_skip_reason,
         provider_failure_category=provider_failure_category,
+        provider_diagnostics=provider_diagnostics,
         validation_findings=validation_findings,
     )
 
@@ -423,6 +438,15 @@ class TranslationMemoryConflict(Exception):
     def __init__(self, key: str) -> None:
         super().__init__(key)
         self.key = key
+
+
+def _effective_provider_id(manifest: dict, provider: str | None) -> str:
+    if provider:
+        return provider
+    default_provider = manifest.get("defaults", {}).get("provider")
+    if isinstance(default_provider, str) and default_provider:
+        return default_provider
+    return "dummy"
 
 
 def _resolve_provider_config(
@@ -823,6 +847,7 @@ def _write_translation_report(
     files: dict[Path, bytes] | None = None,
     provider_skip_reason: str | None = None,
     provider_failure_category: str | None = None,
+    provider_diagnostics: dict | None = None,
     validation_findings: list[dict] | None = None,
     message: str | None = None,
 ) -> CommandResult:
@@ -840,6 +865,8 @@ def _write_translation_report(
         extra_fields["provider_skip_reason"] = provider_skip_reason
     if provider_failure_category:
         extra_fields["provider_failure_category"] = provider_failure_category
+    if provider_diagnostics:
+        extra_fields["provider_diagnostics"] = provider_diagnostics
     if validation_findings is not None:
         extra_fields["validation_findings"] = validation_findings
     report = prepare_report(

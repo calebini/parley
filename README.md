@@ -177,6 +177,38 @@ PYTHONPATH=src python3 -m parley translate \
 
 Add `--dry-run` to preview the creation/registration intent without writing the target file, inventory, or translation memory.
 
+Named provider profiles can be stored in `parley.yaml` so real provider commands do not need to be repeated on every run:
+
+```yaml
+defaults:
+  provider: codex
+  report_format: "json"
+providers:
+  codex:
+    type: command-json
+    command: /path/to/codex_parley_provider.py
+    timeout_seconds: 180
+    request_delivery: stdin_json
+    response_mode: stdout_json
+```
+
+With `defaults.provider` set, `translate` can omit `--provider` and still use the configured profile. An explicit `--provider NAME` overrides the default.
+
+Claude Code can be wired through the same command-json provider boundary:
+
+```yaml
+defaults:
+  provider: claude
+  report_format: "json"
+providers:
+  claude:
+    type: command-json
+    command: /path/to/claude_parley_provider.py
+    timeout_seconds: 180
+    request_delivery: stdin_json
+    response_mode: stdout_json
+```
+
 Validate the generated target:
 
 ```sh
@@ -233,6 +265,8 @@ For a follow-up translation-memory-only run, the same report surface shows reuse
 ```
 
 This is the difference between “the command exited 0” and “we know exactly what changed.”
+
+When a provider-backed translation fails, the translation report records `provider_status: "failed"`, a specific `provider_failure_category` such as `provider_process_failed` or `provider_timeout`, and a bounded `provider_diagnostics` object. For command-backed providers, diagnostics include process telemetry such as exit code, duration, timeout state, and stdout/stderr tails without echoing the provider request payload.
 
 ## Project Artifacts
 

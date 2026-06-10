@@ -31,7 +31,7 @@ Global options:
 | `--quiet` | boolean | `false` | Suppress non-error terminal output. |
 | `--verbose` | boolean | `false` | Include diagnostic details. |
 | `--no-provider` | boolean | `false` | Disallow external provider calls. |
-| `--provider NAME` | string | project default | Provider adapter for semantic, confidence, or translation work. |
+| `--provider NAME` | string | project default, then `dummy` | Provider adapter/profile for semantic, confidence, or translation work. |
 
 Terminal output contracts (MVP):
 
@@ -101,9 +101,15 @@ Provider status reporting (MVP):
   - `unavailable`: the provider was unavailable and provider work was optional.
   - `not_needed`: the command deterministically determined no provider calls were needed (for example no provider-eligible work).
 - If `provider_status` is `failed`, the report MUST include a required field `provider_failure_category` with a closed enum value:
-  - `unavailable`: the provider was unavailable.
-  - `invalid_output`: the provider returned output that failed required output validation.
-  - `error`: any other provider failure (including API errors or timeouts).
+  - `provider_unavailable`: the provider command or backend was unavailable.
+  - `provider_timeout`: the provider command timed out.
+  - `provider_process_failed`: the provider command exited non-zero.
+  - `provider_invalid_output`: the provider returned output that failed required output validation.
+  - `provider_failed`: the provider returned a valid response but refused or failed an entry.
+- If `provider_status` is `failed`, the report MUST include a required field `provider_diagnostics` with:
+  - `classification`: the same classification family as `provider_failure_category`.
+  - `message`: a short provider failure message.
+  - `telemetry`, when available, containing process-level diagnostics such as command path, timestamps, duration, exit code, timeout state, and bounded stdout/stderr tails. Provider diagnostics MUST NOT include the provider request payload.
 
 Parser format resolution (MVP):
 
@@ -832,6 +838,7 @@ Options (MVP):
 | `--format FORMAT` | `ios_strings|android_xml` | no | Parser format for `--create-target`. If omitted, infer from `--target-path`. |
 | `--dry-run` | boolean | no | When true, MUST NOT modify any managed artifacts. Reports MUST still be written. |
 | `--reuse-mode tm_only|tm_then_provider|provider_only` | enum | no | Defaults to `tm_then_provider`. Controls whether the command may reuse translation memory and/or call a provider. |
+| `--provider NAME` | string | no | Provider profile or built-in provider ID. If omitted, use `defaults.provider` from `parley.yaml`; if no default is configured, use `dummy`. |
 | `--no-context` | boolean | no | Bypass `context-anchor.yaml` presence/population requirements for this invocation. Provider generation proceeds without project context and the translation report MUST record `context_mode=disabled`. |
 
 Preconditions (MVP):
@@ -842,6 +849,9 @@ Preconditions (MVP):
 - The command MUST attempt to read and schema-validate `glossary.yaml`.
   - If `glossary.yaml` is missing, the command MUST behave as if an empty terms list is present (no terminology constraints).
   - If `glossary.yaml` is present but schema-invalid, the command MUST fail with exit code `2`.
+- The command MUST resolve the effective provider ID as explicit `--provider`, else `defaults.provider`, else `dummy`.
+  - Built-in provider IDs `dummy` and `command-json` may be used directly.
+  - Any other provider ID MUST resolve to a valid `providers.<id>` profile in `parley.yaml`.
 - The command MUST load the canonical key list/order from validated `canonical-inventory.json`; this order is the canonical-key order used for per-key evaluation and report writing.
 - The command MUST resolve the authoritative inventory entry.
   - If there is no authoritative entry, the command MUST fail with exit code `2`.
@@ -906,9 +916,9 @@ The following table closes translation-report persistence and `provider_status` 
 | `--reuse-mode=tm_only` | no (`not_applicable`) | no | `0` or `1` (per non-provider outcomes) | written | `provider_status=not_applicable` | Full array in canonical-key order; outcomes from ladder (no `generated`). |
 | `--reuse-mode=tm_then_provider` or `provider_only`, but no key reaches tentative `generated` after ladder evaluation | no | no | `0` or `1` (per non-provider outcomes) | written | `provider_status=skipped`, `provider_skip_reason=not_needed` | Full array in canonical-key order; outcomes are `skipped|reused|failed` only. |
 | Provider required and `--no-provider` is set | yes | no | `2` | written | `provider_status=skipped`, `provider_skip_reason=no_provider` | Full array in canonical-key order; any key that would reach `generated` MUST instead be `failed` with report category `provider_disallowed`. |
-| Provider required and provider is unavailable before any provider call is attempted | yes | no | `4` | written | `provider_status=failed`, `provider_failure_category=unavailable` | First key whose outcome would be `generated` MUST be `failed` with report category `provider_failed`; later keys follow the post-failure rule (`provider_not_attempted_after_failure` when they would reach `generated`). |
-| Provider required and provider becomes unavailable on the first provider call | yes | yes (attempted) | `4` | written | `provider_status=failed`, `provider_failure_category=unavailable` | First key whose outcome would be `generated` MUST be `failed` with report category `provider_failed`; later keys follow the post-failure rule (`provider_not_attempted_after_failure` when they would reach `generated`). |
-| Provider required and provider fails or returns invalid required output during generation | yes | yes | `4` | written | `provider_status=failed`, `provider_failure_category=error|invalid_output` as appropriate | First provider-failed key MUST be `failed` with report category `provider_failed`; later keys follow the post-failure rule (`provider_not_attempted_after_failure` when they would reach `generated`). |
+| Provider required and provider is unavailable before any provider call is attempted | yes | no | `4` | written | `provider_status=failed`, `provider_failure_category=provider_unavailable` | First key whose outcome would be `generated` MUST be `failed` with report category `provider_failed`; later keys follow the post-failure rule (`provider_not_attempted_after_failure` when they would reach `generated`). |
+| Provider required and provider becomes unavailable on the first provider call | yes | yes (attempted) | `4` | written | `provider_status=failed`, `provider_failure_category=provider_unavailable` | First key whose outcome would be `generated` MUST be `failed` with report category `provider_failed`; later keys follow the post-failure rule (`provider_not_attempted_after_failure` when they would reach `generated`). |
+| Provider required and provider fails or returns invalid required output during generation | yes | yes | `4` | written | `provider_status=failed`, `provider_failure_category=provider_process_failed|provider_timeout|provider_invalid_output|provider_failed` as appropriate | First provider-failed key MUST be `failed` with report category `provider_failed`; later keys follow the post-failure rule (`provider_not_attempted_after_failure` when they would reach `generated`). |
 | Provider required and all required provider calls succeed | yes | yes | `0` or `1` (per non-provider outcomes) | written | `provider_status=used` | Full array in canonical-key order; keys may be `generated` where provider was used. |
 
 Per-key outcome model (MVP):
@@ -968,7 +978,7 @@ Report requirements (translation, MVP):
   - `target_locale`
   - `target_path` (the resolved target inventory entry `path`)
   - `reuse_mode`
-- `provider_status` (plus conditional provider fields per global Provider status reporting)
+- `provider_status` (plus conditional provider fields per global Provider status reporting, including `provider_diagnostics` for provider failures)
 - `context_mode`, set to `required` or `disabled`
 - `target_would_create`, `target_created`, and `target_registered`
   - `failure_category` when the exit code is `2`, `3`, or `4`

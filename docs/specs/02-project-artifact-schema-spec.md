@@ -146,6 +146,7 @@ Optional MVP fields:
 | `project.localization_root` | `LocalizationRoot` | Directory used to resolve localization inventory paths. Defaults to `.` when omitted. |
 | `defaults.provider` | string | Default provider adapter ID. |
 | `defaults.report_format` | string | If present, MUST be `json` for the MVP. |
+| `providers.<id>` | object | Named provider profile. Provider IDs `dummy` and `command-json` are reserved for built-ins and MUST NOT be used as profile names. |
 
 Validation policy may be represented in `parley.yaml`, but this spec does not define a comprehensive policy matrix for the MVP. If present, policy fields MUST NOT override the exit-code precedence defined by the CLI Command Specification or the category/severity rules defined by the Validation and Error Taxonomy Specification.
 
@@ -167,8 +168,15 @@ artifacts:
   glossary: glossary.yaml
   translation_memory: translation-memory.sqlite
 defaults:
-  provider: openai
+  provider: codex
   report_format: json
+providers:
+  codex:
+    type: command-json
+    command: scripts/codex_parley_provider.py
+    timeout_seconds: 180
+    request_delivery: stdin_json
+    response_mode: stdout_json
 ```
 
 ## 5. `inventory.yaml`
@@ -252,6 +260,8 @@ Timestamp mutation semantics (MVP):
 ## 7. `context-anchor.yaml`
 
 `context-anchor.yaml` stores project-level and per-key context. It may be created by `parley project init` with blank per-key context slots and no provider calls.
+
+Because this artifact is human-authored after initialization, string fields MAY use YAML literal (`|`) or folded (`>`) block scalar syntax for multiline project and per-key context.
 
 Required top-level fields:
 
@@ -429,6 +439,9 @@ Optional common envelope fields:
 | Field | Type | Description |
 | --- | --- |
 | `provider_status` | string | Provider status when a command invokes or classifies provider-backed work. |
+| `provider_skip_reason` | string | Provider skip reason when `provider_status=skipped`. |
+| `provider_failure_category` | string | Provider failure category when `provider_status=failed`. |
+| `provider_diagnostics` | object | Bounded provider diagnostic details when `provider_status=failed`; may include classification, message, and sanitized process telemetry. |
 | `provider` | object | Provider metadata when provider-backed work is used or explicitly classified. |
 | `failure_category` | `FailureCategory` | Shared failure category when the command exits unsuccessfully and a report is written (see Section 9.1). |
 | `findings` | array | Validation/comparison findings. Finding shape, stable finding IDs, and finding order are owned by the Validation and Error Taxonomy Specification. |

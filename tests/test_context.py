@@ -50,6 +50,41 @@ class ContextValidateTests(unittest.TestCase):
             self.assertEqual(payload["summary"]["finding_count"], 0)
             self.assertTrue(payload["context_complete"])
 
+    def test_context_validate_accepts_block_scalar_context_anchor(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            init_project(root)
+            (root / "context-anchor.yaml").write_text(
+                """project_id: "myapp"
+schema_version: "1.0"
+project_context:
+  description: |
+    Project-level description used by translators.
+
+    This may span paragraphs.
+authoritative_locale: "en-us"
+entries:
+  hello:
+    context: >
+      Greeting on the signed-in
+      home screen.
+  bye:
+    context: >-
+      Short farewell in
+      an account menu.
+""",
+                encoding="utf-8",
+            )
+
+            with stable_run_env("2026-05-17T01:01:30.000000Z", "7" * 32):
+                code = run_cli(["context", "validate", "--project-root", str(root)])
+
+            self.assertEqual(code, 0)
+            report = root / "reports" / "validation" / "context_validate--20260517T010130000000Z-77777777777777777777777777777777.json"
+            payload = json.loads(report.read_text(encoding="utf-8"))
+            self.assertEqual(payload["summary"]["finding_count"], 0)
+            self.assertTrue(payload["context_complete"])
+
     def test_context_validate_reports_missing_anchor_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

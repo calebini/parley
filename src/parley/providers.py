@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from parley.command_json import CommandJsonAdapter, CommandJsonConfig, CommandJsonError
+from parley.command_json import CommandJsonAdapter, CommandJsonConfig, CommandJsonError, CommandJsonTelemetry
 from parley.hashing import sha256_canonical_json
 
 
@@ -46,13 +46,16 @@ class DummyTranslationProvider(TranslationProvider):
 
 
 class ProviderInvocationError(RuntimeError):
-    def __init__(self, classification: str, message: str) -> None:
+    def __init__(self, classification: str, message: str, diagnostics: dict[str, Any] | None = None) -> None:
         super().__init__(message)
         self.classification = classification
+        self.diagnostics = diagnostics
 
 
 class ProviderConfigurationError(ValueError):
-    pass
+    def __init__(self, message: str, diagnostics: dict[str, Any] | None = None) -> None:
+        super().__init__(message)
+        self.diagnostics = diagnostics
 
 
 class CommandJsonTranslationProvider(TranslationProvider):
@@ -91,10 +94,17 @@ class CommandJsonTranslationProvider(TranslationProvider):
         try:
             result = adapter.invoke(request_payload)
         except CommandJsonError as exc:
-            raise ProviderInvocationError(exc.classification, str(exc)) from exc
+            raise ProviderInvocationError(exc.classification, str(exc), _command_json_diagnostics(exc)) from exc
         entry = result.artifact["entries"][0]
         if entry["status"] != "translated":
-            raise ProviderInvocationError("provider_failed", entry["failure_reason"] or "provider did not translate entry")
+            raise ProviderInvocationError(
+                "provider_failed",
+                entry["failure_reason"] or "provider did not translate entry",
+                {
+                    "classification": "provider_failed",
+                    "message": entry["failure_reason"] or "provider did not translate entry",
+                },
+            )
         return TranslationResponse(key=request.key, target_value=entry["translated_text"])
 
 
@@ -111,9 +121,21 @@ def translation_provider(
         return DummyTranslationProvider()
     if provider_id == "command-json":
         if provider_command is None:
-            raise ProviderConfigurationError("provider command is required for command-json")
+            raise ProviderConfigurationError(
+                "provider command is required for command-json",
+                {
+                    "classification": "invalid_configuration",
+                    "message": "provider command is required for command-json",
+                },
+            )
         if timeout_seconds <= 0:
-            raise ProviderConfigurationError("provider timeout must be a positive integer")
+            raise ProviderConfigurationError(
+                "provider timeout must be a positive integer",
+                {
+                    "classification": "invalid_configuration",
+                    "message": "provider timeout must be a positive integer",
+                },
+            )
         return CommandJsonTranslationProvider(
             command=provider_command,
             cwd=project_root or Path.cwd(),
@@ -122,6 +144,84 @@ def translation_provider(
             response_mode=response_mode,
         )
     raise ValueError(f"unsupported translation provider: {provider_id}")
+
+
+def _command_json_diagnostics(exc: CommandJsonError) -> dict[str, Any]:
+    diagnostics: dict[str, Any] = {
+        "classification": exc.classification,
+        "message": str(exc),
+    }
+    if exc.telemetry is not None:
+        diagnostics["telemetry"] = _safe_telemetry(exc.telemetry)
+    return diagnostics
+
+
+def _safe_telemetry(telemetry: CommandJsonTelemetry) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "command": telemetry.command,
+        "started_at": telemetry.started_at,
+        "finished_at": telemetry.finished_at,
+        "duration_ms": telemetry.duration_ms,
+        "exit_code": telemetry.exit_code,
+        "timed_out": telemetry.timed_out,
+    }
+    if telemetry.stderr:
+        payload["stderr_tail"] = _safe_stream_tail(telemetry.stderr)
+    if telemetry.stdout:
+        payload["stdout_tail"] = _safe_stream_tail(telemetry.stdout)
+    return payload
+
+
+def _tail(value: str, limit: int = 4000) -> str:
+    if len(value) <= limit:
+        return value
+    return value[-limit:]
+
+
+def _safe_stream_tail(value: str) -> str:
+    if _may_contain_provider_payload(value):
+        return _diagnostic_lines(value) or "[stream omitted because it may contain provider prompt or response content]"
+    return _tail(value)
+
+
+def _may_contain_provider_payload(value: str) -> bool:
+    markers = (
+        "Parley provider request JSON",
+        "\nuser\n",
+        "\nassistant\n",
+        "\nexec\n",
+        "--------\nuser",
+    )
+    return any(marker in value for marker in markers)
+
+
+def _diagnostic_lines(value: str, limit: int = 4000) -> str:
+    kept: list[str] = []
+    keep_next = 0
+    for line in value.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if _is_diagnostic_line(stripped):
+            kept.append(stripped)
+            keep_next = 2 if stripped.startswith("Error loading config.toml") else 0
+        elif keep_next > 0 and len(stripped) <= 160:
+            kept.append(stripped)
+            keep_next -= 1
+    return _tail("\n".join(kept[-40:]), limit)
+
+
+def _is_diagnostic_line(value: str) -> bool:
+    prefixes = (
+        "ERROR:",
+        "Error ",
+        "error:",
+        "WARN ",
+        "WARNING:",
+        "Traceback ",
+        "File ",
+    )
+    return value.startswith(prefixes) or "unsupported service_tier" in value.lower()
 
 
 def _translation_request_payload(*, provider_id: str, request: TranslationRequest) -> dict[str, Any]:

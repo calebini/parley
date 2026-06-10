@@ -69,7 +69,7 @@ def build_parser() -> argparse.ArgumentParser:
     translate.add_argument("--create-target", action="store_true")
     translate.add_argument("--format", choices=["ios_strings", "android_xml"])
     translate.add_argument("--reuse-mode", choices=["tm_only", "tm_then_provider", "provider_only"], default="tm_then_provider")
-    translate.add_argument("--provider", default="dummy")
+    translate.add_argument("--provider")
     translate.add_argument("--provider-command")
     translate.add_argument("--provider-timeout-seconds", type=int)
     translate.add_argument("--provider-request-delivery", choices=["stdin_json", "output_file"])

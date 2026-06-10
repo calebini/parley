@@ -760,6 +760,73 @@ class TranslateTests(unittest.TestCase):
             self.assertEqual(payload["summary"]["provider_id"], "local-fake")
             self.assertEqual([item["outcome"] for item in payload["per_key_outcomes"]], ["generated", "generated"])
 
+    def test_translate_uses_default_provider_config_when_provider_omitted(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            init_project(root)
+            _populate_context_anchor(root)
+            target = _add_empty_target(root)
+            provider = _fake_provider_script(
+                root,
+                """
+                import json
+                import sys
+                request = json.loads(sys.stdin.read())
+                entries = [
+                    {
+                        "key": entry["key"],
+                        "status": "translated",
+                        "translated_text": "[default] " + entry["source_text"],
+                        "failure_reason": None,
+                    }
+                    for entry in request["entries"]
+                ]
+                print(json.dumps({
+                    "schema_version": "1.0",
+                    "request_id": request["request_id"],
+                    "provider_id": request["provider_id"],
+                    "status": "ok",
+                    "entries": entries,
+                    "provider_metadata": None,
+                }))
+                """,
+            )
+            _write_provider_config(
+                root,
+                "default-fake",
+                {
+                    "type": "command-json",
+                    "command": str(provider),
+                    "timeout_seconds": 5,
+                    "request_delivery": "stdin_json",
+                    "response_mode": "stdout_json",
+                },
+                default=True,
+            )
+
+            with stable_run_env("2026-05-16T02:10:00.000000Z", "9" * 32):
+                code = run_cli(
+                    [
+                        "translate",
+                        "--project-root",
+                        str(root),
+                        "--target-locale",
+                        "fr-FR",
+                        "--reuse-mode",
+                        "provider_only",
+                    ]
+                )
+
+            self.assertEqual(code, 0)
+            self.assertEqual(
+                target.read_text(encoding="utf-8"),
+                '"bye" = "[default] Bye";\n"hello" = "[default] Hello %@";\n',
+            )
+            report = root / "reports" / "translation" / "translate--20260516T021000000000Z-99999999999999999999999999999999.json"
+            payload = json.loads(report.read_text(encoding="utf-8"))
+            self.assertEqual(payload["provider_status"], "used")
+            self.assertEqual(payload["summary"]["provider_id"], "default-fake")
+
     def test_translate_named_provider_missing_config_is_usage_failure(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -821,7 +888,7 @@ class TranslateTests(unittest.TestCase):
             init_project(root)
             _populate_context_anchor(root)
             target = _add_empty_target(root)
-            provider = _fake_provider_script(root, "import sys\nsys.exit(9)\n")
+            provider = _fake_provider_script(root, "import sys\nsys.stderr.write('provider exploded\\n')\nsys.exit(9)\n")
 
             with stable_run_env("2026-05-15T21:00:00.000000Z", "1" * 32):
                 code = run_cli(
@@ -846,10 +913,60 @@ class TranslateTests(unittest.TestCase):
             payload = json.loads(report.read_text(encoding="utf-8"))
             self.assertEqual(payload["provider_status"], "failed")
             self.assertEqual(payload["provider_failure_category"], "provider_process_failed")
+            self.assertEqual(payload["provider_diagnostics"]["classification"], "provider_process_failed")
+            self.assertEqual(payload["provider_diagnostics"]["message"], "provider command exited 9")
+            self.assertEqual(payload["provider_diagnostics"]["telemetry"]["command"], str(provider))
+            self.assertEqual(payload["provider_diagnostics"]["telemetry"]["exit_code"], 9)
+            self.assertFalse(payload["provider_diagnostics"]["telemetry"]["timed_out"])
+            self.assertEqual(payload["provider_diagnostics"]["telemetry"]["stderr_tail"], "provider exploded\n")
             self.assertEqual(
                 [item["category"] for item in payload["per_key_outcomes"]],
                 ["provider_failed", "provider_not_attempted_after_failure"],
             )
+
+    def test_translate_command_json_provider_diagnostics_redact_prompt_transcript(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            init_project(root)
+            _populate_context_anchor(root)
+            target = _add_empty_target(root)
+            provider = _fake_provider_script(
+                root,
+                """
+                import sys
+                sys.stderr.write('--------\\nuser\\n')
+                sys.stderr.write('Parley provider request JSON:\\n')
+                sys.stderr.write('SECRET_SOURCE_TEXT\\n')
+                sys.stderr.write('ERROR: {"message":"Unsupported service_tier: flex"}\\n')
+                sys.exit(1)
+                """,
+            )
+
+            with stable_run_env("2026-05-16T04:00:00.000000Z", "8" * 32):
+                code = run_cli(
+                    [
+                        "translate",
+                        "--project-root",
+                        str(root),
+                        "--target-locale",
+                        "fr-FR",
+                        "--reuse-mode",
+                        "provider_only",
+                        "--provider",
+                        "command-json",
+                        "--provider-command",
+                        str(provider),
+                    ]
+                )
+
+            self.assertEqual(code, 4)
+            self.assertEqual(target.read_text(encoding="utf-8"), "")
+            report = root / "reports" / "translation" / "translate--20260516T040000000000Z-88888888888888888888888888888888.json"
+            payload = json.loads(report.read_text(encoding="utf-8"))
+            stderr_tail = payload["provider_diagnostics"]["telemetry"]["stderr_tail"]
+            self.assertIn("Unsupported service_tier: flex", stderr_tail)
+            self.assertNotIn("SECRET_SOURCE_TEXT", stderr_tail)
+            self.assertNotIn("Parley provider request JSON", stderr_tail)
 
     def test_translate_command_json_missing_command_is_usage_failure(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -1204,10 +1321,12 @@ def _fake_provider_script(root: Path, source: str) -> Path:
     return path
 
 
-def _write_provider_config(root: Path, provider_id: str, record: dict) -> None:
+def _write_provider_config(root: Path, provider_id: str, record: dict, *, default: bool = False) -> None:
     manifest_path = root / "parley.yaml"
     manifest = yaml_load(manifest_path.read_text(encoding="utf-8"))
     manifest.setdefault("providers", {})[provider_id] = record
+    if default:
+        manifest.setdefault("defaults", {})["provider"] = provider_id
     manifest_path.write_text(yaml_dump(manifest), encoding="utf-8")
 
 

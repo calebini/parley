@@ -68,13 +68,12 @@ def _yaml_scalar(value: Any) -> str:
         return "null"
     if isinstance(value, (int, float)):
         return str(value)
-    text = str(value)
-    escaped = text.replace("\\", "\\\\").replace('"', '\\"')
-    return f'"{escaped}"'
+    return json.dumps(str(value), ensure_ascii=False)
 
 
 def yaml_load(text: str) -> Any:
     """Parse the small YAML subset emitted by Parley's deterministic writer."""
+    text = _inline_block_scalars(text)
     lines = [
         (len(line) - len(line.lstrip(" ")), line.strip())
         for line in text.splitlines()
@@ -150,6 +149,86 @@ def _parse_yaml_list(lines: list[tuple[int, str]], index: int, indent: int) -> t
     return result, index
 
 
+def _inline_block_scalars(text: str) -> str:
+    raw_lines = text.splitlines()
+    output: list[str] = []
+    index = 0
+    while index < len(raw_lines):
+        line = raw_lines[index]
+        stripped = line.lstrip(" ")
+        indent = len(line) - len(stripped)
+        if stripped and not stripped.startswith("-") and ":" in stripped:
+            key, raw_value = stripped.split(":", 1)
+            indicator = raw_value.strip()
+            if _is_block_scalar_indicator(indicator):
+                block_lines, next_index = _collect_block_scalar_lines(raw_lines, index + 1, indent)
+                value = _block_scalar_value(block_lines, indicator)
+                output.append(f"{' ' * indent}{key}: {json.dumps(value, ensure_ascii=False)}")
+                index = next_index
+                continue
+        output.append(line)
+        index += 1
+    return "\n".join(output)
+
+
+def _is_block_scalar_indicator(value: str) -> bool:
+    if not value:
+        return False
+    style = value[0]
+    if style not in {"|", ">"}:
+        return False
+    return all(ch in {"|", ">", "-", "+"} for ch in value)
+
+
+def _collect_block_scalar_lines(raw_lines: list[str], index: int, parent_indent: int) -> tuple[list[str], int]:
+    block_lines: list[str] = []
+    while index < len(raw_lines):
+        line = raw_lines[index]
+        stripped = line.lstrip(" ")
+        indent = len(line) - len(stripped)
+        if stripped and indent <= parent_indent:
+            break
+        block_lines.append(line)
+        index += 1
+    return block_lines, index
+
+
+def _block_scalar_value(raw_lines: list[str], indicator: str) -> str:
+    if not raw_lines:
+        return ""
+    content_indent = min(
+        (len(line) - len(line.lstrip(" ")) for line in raw_lines if line.strip()),
+        default=0,
+    )
+    lines = [
+        line[content_indent:] if line.strip() else ""
+        for line in raw_lines
+    ]
+    if indicator.startswith(">"):
+        value = _fold_block_scalar(lines)
+    else:
+        value = "\n".join(lines)
+    if "-" not in indicator:
+        value += "\n"
+    return value
+
+
+def _fold_block_scalar(lines: list[str]) -> str:
+    paragraphs: list[str] = []
+    current: list[str] = []
+    for line in lines:
+        if line == "":
+            if current:
+                paragraphs.append(" ".join(item.strip() for item in current))
+                current = []
+            paragraphs.append("")
+            continue
+        current.append(line)
+    if current:
+        paragraphs.append(" ".join(item.strip() for item in current))
+    return "\n".join(paragraphs)
+
+
 def _parse_yaml_scalar(value: str) -> Any:
     if value == "[]":
         return []
@@ -160,8 +239,11 @@ def _parse_yaml_scalar(value: str) -> Any:
     if value == "null":
         return None
     if value.startswith('"') and value.endswith('"'):
-        inner = value[1:-1]
-        return inner.replace('\\"', '"').replace("\\\\", "\\")
+        try:
+            return json.loads(value)
+        except json.JSONDecodeError:
+            inner = value[1:-1]
+            return inner.replace('\\"', '"').replace("\\\\", "\\")
     try:
         return int(value)
     except ValueError:

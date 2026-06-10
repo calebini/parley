@@ -167,6 +167,13 @@ def _validate_yaml_artifact(artifact: str, data: dict[str, Any]) -> None:
         localization_root = project.get("localization_root", ".")
         if not isinstance(localization_root, str) or not localization_root or Path(localization_root).is_absolute() or "\\" in localization_root:
             raise UsageError("parley.yaml project.localization_root must be relative", failure_category="artifact_schema")
+        defaults = data.get("defaults", {})
+        if not isinstance(defaults, dict):
+            raise UsageError("parley.yaml defaults must be object", failure_category="artifact_schema")
+        if "provider" in defaults and (not isinstance(defaults["provider"], str) or not defaults["provider"]):
+            raise UsageError("parley.yaml defaults.provider must be non-empty string", failure_category="artifact_schema")
+        if defaults.get("report_format", "json") != "json":
+            raise UsageError("parley.yaml defaults.report_format must be json", failure_category="artifact_schema")
         for field in ["inventory", "canonical_inventory", "context_anchor", "glossary", "translation_memory"]:
             if not artifacts.get(field):
                 raise UsageError(f"parley.yaml missing artifacts.{field}", failure_category="artifact_schema")
