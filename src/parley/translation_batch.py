@@ -29,6 +29,7 @@ def translate_batch_project(
     provider_request_delivery: str | None = None,
     provider_response_mode: str | None = None,
     write_order: str = "alphabetical",
+    target_conflict_mode: str = "fail",
     progress_callback: Callable[[str, str, int, int], None] | None = None,
 ) -> CommandResult:
     started_at = utc_now()
@@ -48,6 +49,9 @@ def translate_batch_project(
     target_results: list[dict] = []
     reports: list[Path] = []
     for target in selected:
+        target_progress_callback = None
+        if progress_callback is not None:
+            target_progress_callback = _target_progress_callback(progress_callback, target)
         result = translate_project(
             project_root=str(root),
             target_locale=target["locale"],
@@ -66,7 +70,8 @@ def translate_batch_project(
             provider_request_delivery=provider_request_delivery,
             provider_response_mode=provider_response_mode,
             write_order=write_order,
-            progress_callback=progress_callback,
+            target_conflict_mode=target_conflict_mode,
+            progress_callback=target_progress_callback,
         )
         reports.extend(result.reports)
         per_target_payload = _read_report_payload(result.reports[-1]) if result.reports else None
@@ -85,6 +90,7 @@ def translate_batch_project(
             "target_locales": [_lower_ascii(item) for item in target_locales] if target_locales else None,
             "reuse_mode": reuse_mode,
             "write_order": write_order,
+            "target_conflict_mode": target_conflict_mode,
             "dry_run": dry_run,
             "no_provider": no_provider,
             "no_context": no_context,
@@ -100,6 +106,18 @@ def translate_batch_project(
     except ParleyError as exc:
         return CommandResult(exc.exit_code, reports, str(exc))
     return CommandResult(exit_code, [*reports, rollup.path])
+
+
+def _target_progress_callback(
+    progress_callback: Callable[[str, str, int, int], None],
+    target: dict,
+) -> Callable[[str, str, int, int], None]:
+    prefix = f"[{target['locale']} {target['path']}]"
+
+    def emit(key: str, source_value: str, index: int, total: int) -> None:
+        progress_callback(f"{prefix} {key}", source_value, index, total)
+
+    return emit
 
 
 def _selected_targets(inventory: dict, target_locales: list[str] | None) -> list[dict]:

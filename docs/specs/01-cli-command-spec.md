@@ -186,6 +186,8 @@ Canonical command names (MVP):
 | `parley glossary suggest` | `glossary_suggest` |
 | `parley context validate` | `context_validate` |
 | `parley validate` | `validate` |
+| `parley lint audit` | `lint_audit` |
+| `parley lint fix` | `lint_fix` |
 | `parley tm import-target` | `tm_import_target` |
 | `parley tm import-lproj-dir` | `tm_import_lproj_dir` |
 | `parley translate` | `translate` |
@@ -782,6 +784,57 @@ Exit behavior (MVP):
 - Otherwise, if validation produces one or more `blocking` findings for any selected entry and report writing succeeds, the command MUST exit with code `1`.
 - Otherwise, if report writing succeeds, the command MUST exit with code `0`.
 
+### 7.3 `parley lint`
+
+Audits localization polish and optionally applies conservative mechanical fixes.
+
+```text
+parley lint audit [--profile basic|release] [--scope files|tm|all]
+parley lint fix [--profile basic|release] [--scope files|tm|all] [--dry-run]
+```
+
+Scope (MVP):
+
+- `lint audit` and `lint fix` MUST resolve `<project-root>` using global project-root resolution rules.
+- Both commands MUST read and schema-validate `parley.yaml`, `inventory.yaml`, and `canonical-inventory.json`.
+- Both commands MUST scan registered localization files in deterministic inventory order.
+- Both commands SHOULD scan current translation-memory records when `translation-memory.sqlite` exists.
+- The default profile MUST be `basic`.
+- The default scope MUST be `files`.
+- `--scope files` MUST scan registered localization files.
+- `--scope tm` MUST scan current translation-memory records.
+- `--scope all` MUST scan both registered localization files and current translation-memory records.
+- The `basic` profile MUST include:
+  - localization parseability
+  - missing and extra keys relative to the authoritative canonical inventory
+  - placeholder signature drift for target localizations
+  - suspected mojibake or replacement-character encoding artifacts
+- The `release` profile MUST include all `basic` rules and MAY add noisier quality warnings such as source-equals-target and newline-count drift.
+
+Fix behavior (MVP):
+
+- `lint fix` MUST be conservative and MUST NOT attempt semantic translation changes.
+- `lint fix` MAY apply only high-confidence mechanical fixes, including mojibake repairs such as `Ã¡` to `á` and mangled smart-quote byte sequences to Unicode quotes.
+- `lint fix --dry-run` MUST report fixable findings without mutating localization files or translation memory.
+- Non-dry-run `lint fix` MUST update affected localization files and matching current translation-memory records when both contain a fixable value.
+- Non-dry-run `lint fix --scope tm` MUST update matching current translation-memory records and MUST NOT mutate localization files.
+- Non-dry-run `lint fix` MUST re-audit after applying fixes and write the post-fix findings in its report.
+
+Report requirements (MVP):
+
+- Reports MUST be written under `<resolved --report-dir>/lint/`.
+- `lint audit` reports MUST use `canonical_command=lint_audit`.
+- `lint fix` reports MUST use `canonical_command=lint_fix`.
+- The report summary MUST include `profile`, `scope`, `mode`, `dry_run`, `localization_count`, `tm_record_count`, `finding_count`, `fixable_count`, and `applied_count`.
+- Findings MUST include `severity`, `category`, `code`, `locale`, `path`, and `key` when a finding is key-specific.
+- Fixable findings SHOULD include `suggested_value` and `fixable: true`.
+
+Exit behavior (MVP):
+
+- If baseline project artifacts cannot be read or schema-validated, the command MUST exit with code `2`.
+- Otherwise, if post-audit findings remain and report writing succeeds, the command MUST exit with code `1`.
+- Otherwise, if no findings remain and report writing succeeds, the command MUST exit with code `0`.
+
 ## 8. Translation Commands
 
 ### 8.0 `parley tm import-target`
@@ -862,7 +915,7 @@ Report requirements (MVP):
 Runs `parley translate` over multiple registered target localizations and writes a roll-up report.
 
 ```text
-parley translate-batch [--target-locale LOCALE]... [--reuse-mode tm_only|tm_then_provider|provider_only] [--write-order alphabetical|authoritative] [--dry-run] [--no-provider] [--no-context]
+parley translate-batch [--target-locale LOCALE]... [--reuse-mode tm_only|tm_then_provider|provider_only] [--write-order alphabetical|authoritative] [--target-conflict-mode fail|preserve_target] [--dry-run] [--no-provider] [--no-context]
 ```
 
 Options (MVP):
@@ -873,6 +926,7 @@ Options (MVP):
 | `--reuse-mode tm_only|tm_then_provider|provider_only` | enum | no | Passed through to each per-target `translate` invocation. Defaults to `tm_then_provider`. |
 | `--provider NAME` | string | no | Passed through to each per-target `translate` invocation. |
 | `--write-order alphabetical|authoritative` | enum | no | Passed through to each per-target `translate` invocation. Defaults to `alphabetical`. |
+| `--target-conflict-mode fail|preserve_target` | enum | no | Passed through to each per-target `translate` invocation. Defaults to `fail`. |
 | `--dry-run` | boolean | no | Passed through to each per-target `translate` invocation. |
 | `--no-provider` | boolean | no | Passed through to each per-target `translate` invocation. |
 | `--no-context` | boolean | no | Passed through to each per-target `translate` invocation. |
@@ -911,7 +965,7 @@ Exit behavior (MVP):
 Translates from the project's authoritative localization into a target localization in project mode.
 
 ```text
-parley translate --target-locale LOCALE [--target-path PATH] [--create-target] [--format FORMAT] [--dry-run] [--reuse-mode tm_only|tm_then_provider|provider_only] [--write-order alphabetical|authoritative] [--no-context]
+parley translate --target-locale LOCALE [--target-path PATH] [--create-target] [--format FORMAT] [--dry-run] [--reuse-mode tm_only|tm_then_provider|provider_only] [--write-order alphabetical|authoritative] [--target-conflict-mode fail|preserve_target] [--no-context]
 ```
 
 Project-mode requirement (MVP):
@@ -931,6 +985,7 @@ Options (MVP):
 | `--reuse-mode tm_only|tm_then_provider|provider_only` | enum | no | Defaults to `tm_then_provider`. Controls whether the command may reuse translation memory and/or call a provider. |
 | `--provider NAME` | string | no | Provider profile or built-in provider ID. If omitted, use `defaults.provider` from `parley.yaml`; if no default is configured, use `dummy`. |
 | `--write-order alphabetical|authoritative` | enum | no | Defaults to `alphabetical`. Controls target localization entry ordering during write-back only. |
+| `--target-conflict-mode fail|preserve_target` | enum | no | Defaults to `fail`. When set to `preserve_target`, an existing target-file value wins over a differing approved or locked current TM record; the key is reported as skipped with category `target_preserved`. Missing target keys can still be filled from TM or provider generation. |
 | `--no-context` | boolean | no | Bypass `context-anchor.yaml` presence/population requirements for this invocation. Provider generation proceeds without project context and the translation report MUST record `context_mode=disabled`. |
 
 Preconditions (MVP):
@@ -1041,10 +1096,11 @@ Canonical key decision ladder (MVP):
 - For each canonical key after input classification, the command MUST choose the first matching path below and MUST NOT evaluate later paths for that key. When glossary terms are present, provider-backed generation MUST apply resolved glossary terminology constraints for the target locale (and MUST treat provider output that violates blocking glossary constraints as `invalid_output` provider failure for that key):
   1. `skipped` with report category `unchanged`: an existing target value is present, the selected current translation-memory record has `last_translated_source_hash` equal to the current authoritative `content_hash`, and that record's `target_value` exactly equals the existing target value.
   2. `skipped` with report category `human_status_preserved`: the selected current translation-memory record has `human_status` of `locked` or `approved`, and that record's `target_value` exactly equals the existing target value.
-  3. `failed` with report category `target_tm_conflict`: the selected current translation-memory record has `human_status` of `locked` or `approved`, but the existing target value is missing or differs from that record's `target_value`.
-  4. `reused`: `--reuse-mode` is `tm_only` or `tm_then_provider`, and a deterministic eligible translation-memory reuse winner exists under the reuse ordering below. The reused target value is the winner's `target_value`.
-  5. `generated`: `--reuse-mode` is `tm_then_provider` or `provider_only`. Provider generation is required for this key, and the generated target value is determined by the provider response if the provider succeeds.
-  6. `failed` with report category `tm_miss`: `--reuse-mode` is `tm_only` and no eligible reuse winner exists.
+  3. `skipped` with report category `target_preserved`: `--target-conflict-mode=preserve_target`, an existing target value is present, and the selected current translation-memory record has `human_status` of `locked` or `approved` but a differing `target_value`.
+  4. `failed` with report category `target_tm_conflict`: `--target-conflict-mode=fail`, the selected current translation-memory record has `human_status` of `locked` or `approved`, but the existing target value is missing or differs from that record's `target_value`.
+  5. `reused`: `--reuse-mode` is `tm_only` or `tm_then_provider`, and a deterministic eligible translation-memory reuse winner exists under the reuse ordering below. The reused target value is the winner's `target_value`.
+  6. `generated`: `--reuse-mode` is `tm_then_provider` or `provider_only`. Provider generation is required for this key, and the generated target value is determined by the provider response if the provider succeeds.
+  7. `failed` with report category `tm_miss`: `--reuse-mode` is `tm_only` and no eligible reuse winner exists.
 - Provider-backed work is required for the invocation if and only if one or more keys are assigned the tentative path `generated`.
 - If provider generation is attempted and fails for a key:
   - That key's final outcome MUST be `failed` with report category `provider_failed`.

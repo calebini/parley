@@ -140,6 +140,7 @@ PYTHONPATH=src python3 -m parley translate \
   --target-path "/path/to/MyApp/fr.lproj/Localizable.strings" \
   --reuse-mode tm_then_provider \
   --write-order authoritative \
+  --target-conflict-mode preserve_target \
   --dry-run
 ```
 
@@ -151,10 +152,11 @@ PYTHONPATH=src python3 -m parley translate \
   --target-locale fr-FR \
   --target-path "/path/to/MyApp/fr.lproj/Localizable.strings" \
   --reuse-mode tm_then_provider \
-  --write-order authoritative
+  --write-order authoritative \
+  --target-conflict-mode preserve_target
 ```
 
-Existing production translations are preserved through approved/imported TM. Missing keys are generated.
+Existing production target-file translations are preserved. Missing keys are filled from TM first, then generated through the configured provider when needed.
 
 ## 8. Translate All Locales
 
@@ -165,6 +167,7 @@ PYTHONPATH=src python3 -m parley translate-batch \
   --project-root "/path/to/MyApp/parley" \
   --reuse-mode tm_then_provider \
   --write-order authoritative \
+  --target-conflict-mode preserve_target \
   --dry-run
 ```
 
@@ -174,7 +177,8 @@ Apply:
 PYTHONPATH=src python3 -m parley translate-batch \
   --project-root "/path/to/MyApp/parley" \
   --reuse-mode tm_then_provider \
-  --write-order authoritative
+  --write-order authoritative \
+  --target-conflict-mode preserve_target
 ```
 
 Batch translation writes:

@@ -583,6 +583,45 @@ class TranslateTests(unittest.TestCase):
             self.assertEqual(rows["tm-hello-new"]["updated_at"], "2026-05-15T19:00:00.000000Z")
             self.assertEqual(rows["tm-hello-old"]["is_current"], 0)
 
+    def test_translate_preserve_target_conflict_mode_keeps_target_values(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            init_project(root)
+            _populate_context_anchor(root)
+            target = _add_target(root, "fr-FR", '"hello" = "Bonjour fichier %@";\n')
+            canonical = json.loads((root / "canonical-inventory.json").read_text(encoding="utf-8"))
+            _insert_tm_record(root, canonical, "hello", "Bonjour TM %@", human_status="approved")
+            _insert_tm_record(root, canonical, "bye", "Au revoir", human_status="approved")
+
+            with stable_run_env("2026-05-15T19:30:00.000000Z", "0" * 32):
+                code = run_cli(
+                    [
+                        "translate",
+                        "--project-root",
+                        str(root),
+                        "--target-locale",
+                        "fr-FR",
+                        "--reuse-mode",
+                        "tm_only",
+                        "--target-conflict-mode",
+                        "preserve_target",
+                    ]
+                )
+
+            self.assertEqual(code, 0)
+            self.assertEqual(
+                target.read_text(encoding="utf-8"),
+                '"bye" = "Au revoir";\n"hello" = "Bonjour fichier %@";\n',
+            )
+            report = root / "reports" / "translation" / "translate--20260515T193000000000Z-00000000000000000000000000000000.json"
+            payload = json.loads(report.read_text(encoding="utf-8"))
+            outcomes = {item["key"]: item for item in payload["per_key_outcomes"]}
+            self.assertEqual(outcomes["bye"]["outcome"], "reused")
+            self.assertEqual(outcomes["hello"]["outcome"], "skipped")
+            self.assertEqual(outcomes["hello"]["category"], "target_preserved")
+            self.assertEqual(payload["summary"]["target_preserved_count"], 1)
+            self.assertEqual(payload["inputs"]["target_conflict_mode"], "preserve_target")
+
     def test_translate_command_json_provider_generates_with_fake_cli(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -1287,6 +1326,32 @@ class TranslateTests(unittest.TestCase):
             self.assertEqual(payload["summary"]["written_target_count"], 2)
             self.assertEqual(payload["summary"]["tm_written_count"], 2)
 
+    def test_translate_batch_progress_includes_target_context(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            init_project(root)
+            _add_target(root, "fr-FR", "")
+            _add_target(root, "de-DE", "")
+
+            code, stdout, stderr = run_cli_capture(
+                [
+                    "translate-batch",
+                    "--project-root",
+                    str(root),
+                    "--reuse-mode",
+                    "provider_only",
+                    "--provider",
+                    "dummy",
+                    "--no-context",
+                    "--dry-run",
+                ]
+            )
+
+            self.assertEqual(code, 0)
+            self.assertIn("command=translate_batch", stdout)
+            self.assertIn("translating 1/2 [de-de de.lproj/Localizable.strings] bye: Bye\n", stderr)
+            self.assertIn("translating 1/2 [fr-fr fr.lproj/Localizable.strings] bye: Bye\n", stderr)
+
 
 def _populate_context_anchor(root: Path) -> None:
     canonical = json.loads((root / "canonical-inventory.json").read_text(encoding="utf-8"))
@@ -1357,6 +1422,7 @@ def _insert_tm_record(
     record_id: str | None = None,
     is_current: int = 1,
     updated_at: str = "2026-05-15T09:00:00.000000Z",
+    human_status: str = "reviewed",
 ) -> None:
     entry = canonical["entries"][key]
     with sqlite3.connect(root / "translation-memory.sqlite") as conn:
@@ -1381,7 +1447,7 @@ def _insert_tm_record(
                 target_value,
                 entry["placeholder_signature"],
                 "human_reviewed",
-                "reviewed",
+                human_status,
                 is_current,
                 "{}",
                 "{}",

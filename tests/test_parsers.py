@@ -36,16 +36,31 @@ class ParserTests(unittest.TestCase):
         )
 
     def test_ios_strings_round_trips_escaping_and_placeholders(self) -> None:
-        content = '"quote" = "Say \\"Hello\\" to %@";\n"count" = "%d tasks";\n'
+        content = '"quote" = "Say \\"Hello\\" to %@";\n"count" = "%d tasks";\n"accent" = "Prêt";\n'
         parsed = parse_localization(content, "ios_strings")
-        self.assertEqual(parsed.entry_order, ["quote", "count"])
+        self.assertEqual(parsed.entry_order, ["quote", "count", "accent"])
         serialized = serialize_localization(parsed.entries, "ios_strings")
         self.assertIn('"quote" = "Say \\"Hello\\" to %@";', serialized)
+        self.assertIn('"accent" = "Prêt";', serialized)
         reparsed = parse_localization(serialized, "ios_strings")
         self.assertEqual(
             [(entry.key, entry.value, entry.placeholder_signature) for entry in reparsed.entries],
             [(entry.key, entry.value, entry.placeholder_signature) for entry in parsed.entries],
         )
+
+    def test_ios_strings_escapes_non_lf_line_separators(self) -> None:
+        entries = [
+            ParsedEntry("carriage", "Line one\rLine two", []),
+            ParsedEntry("unicode", "Line one\u2028Line two\u2029", []),
+        ]
+
+        serialized = serialize_localization(entries, "ios_strings", sort_keys=False)
+        self.assertIn('"carriage" = "Line one\\rLine two";', serialized)
+        self.assertIn('"unicode" = "Line one\\u2028Line two\\u2029";', serialized)
+        reparsed = parse_localization(serialized, "ios_strings")
+        values = {entry.key: entry.value for entry in reparsed.entries}
+        self.assertEqual(values["carriage"], "Line one\rLine two")
+        self.assertEqual(values["unicode"], "Line one\u2028Line two\u2029")
 
     def test_ios_strings_tolerates_utf8_bom(self) -> None:
         parsed = parse_localization('\ufeff"hello" = "Hello";\n', "ios_strings")

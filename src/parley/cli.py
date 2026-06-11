@@ -10,6 +10,7 @@ from parley.errors import EXIT_USAGE_OR_SCHEMA
 from parley.glossary import glossary_import, glossary_init, glossary_list, glossary_suggest_from_tm, glossary_validate
 from parley.locale_reference import locale_reference_list
 from parley.localization import localization_add, localization_list
+from parley.lint import lint_audit, lint_fix
 from parley.project_init import project_init
 from parley.translation import translate_project
 from parley.translation_batch import translate_batch_project
@@ -76,6 +77,7 @@ def build_parser() -> argparse.ArgumentParser:
     translate.add_argument("--provider-request-delivery", choices=["stdin_json", "output_file"])
     translate.add_argument("--provider-response-mode", choices=["stdout_json", "stdout_json_envelope", "output_file_json"])
     translate.add_argument("--write-order", choices=["alphabetical", "authoritative"], default="alphabetical")
+    translate.add_argument("--target-conflict-mode", choices=["fail", "preserve_target"], default="fail")
     translate.add_argument("--dry-run", action="store_true")
     translate.add_argument("--no-provider", action="store_true")
     translate.add_argument("--no-context", action="store_true")
@@ -91,6 +93,7 @@ def build_parser() -> argparse.ArgumentParser:
     translate_batch.add_argument("--provider-request-delivery", choices=["stdin_json", "output_file"])
     translate_batch.add_argument("--provider-response-mode", choices=["stdout_json", "stdout_json_envelope", "output_file_json"])
     translate_batch.add_argument("--write-order", choices=["alphabetical", "authoritative"], default="alphabetical")
+    translate_batch.add_argument("--target-conflict-mode", choices=["fail", "preserve_target"], default="fail")
     translate_batch.add_argument("--dry-run", action="store_true")
     translate_batch.add_argument("--no-provider", action="store_true")
     translate_batch.add_argument("--no-context", action="store_true")
@@ -148,6 +151,20 @@ def build_parser() -> argparse.ArgumentParser:
     context_validate_parser = context_sub.add_parser("validate")
     context_validate_parser.add_argument("--project-root")
     context_validate_parser.add_argument("--report-dir")
+
+    lint = subparsers.add_parser("lint")
+    lint_sub = lint.add_subparsers(dest="lint_command")
+    lint_audit_parser = lint_sub.add_parser("audit")
+    lint_audit_parser.add_argument("--project-root")
+    lint_audit_parser.add_argument("--profile", choices=["basic", "release"], default="basic")
+    lint_audit_parser.add_argument("--scope", choices=["files", "tm", "all"], default="files")
+    lint_audit_parser.add_argument("--report-dir")
+    lint_fix_parser = lint_sub.add_parser("fix")
+    lint_fix_parser.add_argument("--project-root")
+    lint_fix_parser.add_argument("--profile", choices=["basic", "release"], default="basic")
+    lint_fix_parser.add_argument("--scope", choices=["files", "tm", "all"], default="files")
+    lint_fix_parser.add_argument("--dry-run", action="store_true")
+    lint_fix_parser.add_argument("--report-dir")
 
     return parser
 
@@ -256,6 +273,7 @@ def main(argv: list[str] | None = None) -> int:
             provider_request_delivery=args.provider_request_delivery,
             provider_response_mode=args.provider_response_mode,
             write_order=args.write_order,
+            target_conflict_mode=args.target_conflict_mode,
             dry_run=args.dry_run,
             no_provider=args.no_provider,
             no_context=args.no_context,
@@ -286,6 +304,7 @@ def main(argv: list[str] | None = None) -> int:
             provider_request_delivery=args.provider_request_delivery,
             provider_response_mode=args.provider_response_mode,
             write_order=args.write_order,
+            target_conflict_mode=args.target_conflict_mode,
             dry_run=args.dry_run,
             no_provider=args.no_provider,
             no_context=args.no_context,
@@ -438,6 +457,32 @@ def main(argv: list[str] | None = None) -> int:
         if result.message:
             print(result.message, file=sys.stderr)
         return result.exit_code
+    if args.command_group == "lint":
+        lint_command = args.lint_command or "audit"
+        lint_profile = getattr(args, "profile", "basic")
+        lint_scope = getattr(args, "scope", "files")
+        if lint_command == "audit":
+            result = lint_audit(project_root=args.project_root, profile=lint_profile, scope=lint_scope, report_dir=getattr(args, "report_dir", None), cwd=Path.cwd())
+            _emit_payload_or_summary(
+                command="lint_audit",
+                result=result,
+                output_format=args.output_format,
+                quiet=args.quiet,
+            )
+            if result.message:
+                print(result.message, file=sys.stderr)
+            return result.exit_code
+        if lint_command == "fix":
+            result = lint_fix(project_root=args.project_root, profile=lint_profile, scope=lint_scope, dry_run=args.dry_run, report_dir=args.report_dir, cwd=Path.cwd())
+            _emit_payload_or_summary(
+                command="lint_fix",
+                result=result,
+                output_format=args.output_format,
+                quiet=args.quiet,
+            )
+            if result.message:
+                print(result.message, file=sys.stderr)
+            return result.exit_code
     parser.print_help(sys.stderr)
     return EXIT_USAGE_OR_SCHEMA
 

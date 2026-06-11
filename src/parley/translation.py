@@ -7,7 +7,7 @@ from typing import Callable
 
 from parley.artifacts import load_project_artifacts, resolve_project_root, schema_issues_for_required
 from parley.atomic import commit_files
-from parley.errors import EXIT_BLOCKING_FINDINGS, EXIT_IO_OR_PARSER, EXIT_OK, EXIT_PROVIDER, EXIT_USAGE_OR_SCHEMA, ParleyError, UsageError
+from parley.errors import EXIT_BLOCKING_FINDINGS, EXIT_IO_OR_PARSER, EXIT_OK, EXIT_PROVIDER, EXIT_USAGE_OR_SCHEMA, ParserError, ParleyError, UsageError
 from parley.glossary_terms import resolve_constraints, terminology_findings
 from parley.hashing import sha256_canonical_json
 from parley.parsers import ParsedEntry, infer_format, parse_localization, serialize_localization
@@ -50,11 +50,14 @@ def translate_project(
     provider_request_delivery: str | None = None,
     provider_response_mode: str | None = None,
     write_order: str = "alphabetical",
+    target_conflict_mode: str = "fail",
     progress_callback: Callable[[str, str, int, int], None] | None = None,
 ) -> CommandResult:
     started_at = utc_now()
     if write_order not in {"alphabetical", "authoritative"}:
         return CommandResult(EXIT_USAGE_OR_SCHEMA, [], f"unsupported write order: {write_order}")
+    if target_conflict_mode not in {"fail", "preserve_target"}:
+        return CommandResult(EXIT_USAGE_OR_SCHEMA, [], f"unsupported target conflict mode: {target_conflict_mode}")
     try:
         root = resolve_project_root(project_root, cwd)
         artifact_issues = schema_issues_for_required(
@@ -119,6 +122,7 @@ def translate_project(
             no_context=no_context,
             provider=provider_id,
             write_order=write_order,
+            target_conflict_mode=target_conflict_mode,
             message=str(exc),
         )
     except ParleyError as exc:
@@ -144,6 +148,7 @@ def translate_project(
             no_context=no_context,
             provider=provider_id,
             write_order=write_order,
+            target_conflict_mode=target_conflict_mode,
             message=str(exc),
         )
 
@@ -178,6 +183,7 @@ def translate_project(
                 no_context=no_context,
                 provider=provider_id,
                 write_order=write_order,
+                target_conflict_mode=target_conflict_mode,
                 message=str(exc),
             )
         except ParleyError as exc:
@@ -203,6 +209,7 @@ def translate_project(
                 no_context=no_context,
                 provider=provider_id,
                 write_order=write_order,
+                target_conflict_mode=target_conflict_mode,
                 message=str(exc),
             )
 
@@ -237,6 +244,7 @@ def translate_project(
             no_context=no_context,
             provider=provider_id,
             write_order=write_order,
+            target_conflict_mode=target_conflict_mode,
         )
 
     try:
@@ -249,6 +257,7 @@ def translate_project(
                 target_locale=normalized_target_locale,
                 target_entries=target_entries,
                 reuse_mode=reuse_mode,
+                target_conflict_mode=target_conflict_mode,
             )
     except TranslationMemoryConflict as exc:
         outcomes = [
@@ -277,6 +286,7 @@ def translate_project(
             no_context=no_context,
             provider=provider_id,
             write_order=write_order,
+            target_conflict_mode=target_conflict_mode,
         )
     except sqlite3.DatabaseError as exc:
         return CommandResult(EXIT_USAGE_OR_SCHEMA, [], f"invalid translation-memory.sqlite: {exc}")
@@ -385,40 +395,48 @@ def translate_project(
             target["format"],
             sort_keys=write_order == "alphabetical",
         )
-        staged_parsed = parse_localization(staged_content, target["format"])
-        validation_findings = _placeholder_findings(target, staged_parsed.entries, canonical)
-        validation_findings.extend(
-            _glossary_findings(
-                target=target,
-                staged_entries=staged_parsed.entries,
-                canonical=canonical,
-                source_locale=artifacts.manifest["project"]["authoritative_locale"],
-                glossary=artifacts.glossary,
-            )
-        )
-        if any(item.get("severity") == "blocking" for item in validation_findings):
-            exit_code = EXIT_BLOCKING_FINDINGS
-            failure_category = "blocking_validation_findings"
-        elif not dry_run:
-            if target_created_for_run:
-                target["last_observed_hash"] = staged_parsed.normalized_hash
-                files[root / "inventory.yaml"] = yaml_dump(inventory_after_create).encode("utf-8")
-                target_registered = True
-            files[target_file] = staged_content.encode("utf-8")
-            target_created = target_created_for_run
-            try:
-                tm_bytes = _translation_memory_after_writeback(
-                    tm_path=root / artifacts.manifest["artifacts"]["translation_memory"],
-                    project_id=artifacts.project_id,
+        try:
+            staged_parsed = parse_localization(staged_content, target["format"])
+        except ParserError as exc:
+            exit_code = EXIT_IO_OR_PARSER
+            failure_category = "staged_parse_error"
+            validation_findings = [
+                _staged_parse_finding(target=target, message=str(exc)),
+            ]
+        else:
+            validation_findings = _placeholder_findings(target, staged_parsed.entries, canonical)
+            validation_findings.extend(
+                _glossary_findings(
+                    target=target,
+                    staged_entries=staged_parsed.entries,
                     canonical=canonical,
                     source_locale=artifacts.manifest["project"]["authoritative_locale"],
-                    target_locale=normalized_target_locale,
-                    outcomes=outcomes,
-                    updated_at=started_at,
+                    glossary=artifacts.glossary,
                 )
-            except sqlite3.DatabaseError as exc:
-                return CommandResult(EXIT_USAGE_OR_SCHEMA, [], f"invalid translation-memory.sqlite: {exc}")
-            files[root / artifacts.manifest["artifacts"]["translation_memory"]] = tm_bytes
+            )
+            if any(item.get("severity") == "blocking" for item in validation_findings):
+                exit_code = EXIT_BLOCKING_FINDINGS
+                failure_category = "blocking_validation_findings"
+            elif not dry_run:
+                if target_created_for_run:
+                    target["last_observed_hash"] = staged_parsed.normalized_hash
+                    files[root / "inventory.yaml"] = yaml_dump(inventory_after_create).encode("utf-8")
+                    target_registered = True
+                files[target_file] = staged_content.encode("utf-8")
+                target_created = target_created_for_run
+                try:
+                    tm_bytes = _translation_memory_after_writeback(
+                        tm_path=root / artifacts.manifest["artifacts"]["translation_memory"],
+                        project_id=artifacts.project_id,
+                        canonical=canonical,
+                        source_locale=artifacts.manifest["project"]["authoritative_locale"],
+                        target_locale=normalized_target_locale,
+                        outcomes=outcomes,
+                        updated_at=started_at,
+                    )
+                except sqlite3.DatabaseError as exc:
+                    return CommandResult(EXIT_USAGE_OR_SCHEMA, [], f"invalid translation-memory.sqlite: {exc}")
+                files[root / artifacts.manifest["artifacts"]["translation_memory"]] = tm_bytes
 
     return _write_translation_report(
         root=root,
@@ -447,6 +465,7 @@ def translate_project(
         provider_diagnostics=provider_diagnostics,
         validation_findings=validation_findings,
         write_order=write_order,
+        target_conflict_mode=target_conflict_mode,
     )
 
 
@@ -530,6 +549,7 @@ def _evaluate_outcomes(
     target_locale: str,
     target_entries: dict[str, ParsedEntry],
     reuse_mode: str,
+    target_conflict_mode: str,
 ) -> list[dict]:
     outcomes: list[dict] = []
     for key in sorted(canonical["entries"]):
@@ -551,8 +571,12 @@ def _evaluate_outcomes(
             outcomes.append(_outcome(key, "skipped", "human_status_preserved", current.tm_record_id))
             continue
         if current and current.human_status in {"approved", "locked"}:
-            outcomes.append(_outcome(key, "failed", "target_tm_conflict", current.tm_record_id))
-            continue
+            if target_conflict_mode == "preserve_target" and existing is not None:
+                outcomes.append(_outcome(key, "skipped", "target_preserved", current.tm_record_id))
+                continue
+            if target_conflict_mode == "fail":
+                outcomes.append(_outcome(key, "failed", "target_tm_conflict", current.tm_record_id))
+                continue
         if reuse_mode in {"tm_only", "tm_then_provider"}:
             winner = _reuse_winner(
                 conn,
@@ -866,6 +890,7 @@ def _write_translation_report(
     provider_diagnostics: dict | None = None,
     validation_findings: list[dict] | None = None,
     write_order: str = "alphabetical",
+    target_conflict_mode: str = "fail",
     message: str | None = None,
 ) -> CommandResult:
     files = files or {}
@@ -876,6 +901,7 @@ def _write_translation_report(
         "target_path": target["path"],
         "reuse_mode": reuse_mode,
         "write_order": write_order,
+        "target_conflict_mode": target_conflict_mode,
         "provider_status": provider_status,
         "per_key_outcomes": per_key_outcomes,
     }
@@ -900,6 +926,7 @@ def _write_translation_report(
             "target_path": target["path"],
             "reuse_mode": reuse_mode,
             "write_order": write_order,
+            "target_conflict_mode": target_conflict_mode,
             "dry_run": dry_run,
             "create_target": create_target,
             "target_would_create": target_would_create,
@@ -913,6 +940,7 @@ def _write_translation_report(
             "reused_count": sum(1 for item in per_key_outcomes if item["outcome"] == "reused"),
             "skipped_count": sum(1 for item in per_key_outcomes if item["outcome"] == "skipped"),
             "generated_count": sum(1 for item in per_key_outcomes if item["outcome"] == "generated"),
+            "target_preserved_count": sum(1 for item in per_key_outcomes if item.get("category") == "target_preserved"),
             "written_target": written_target,
             "target_would_create": target_would_create,
             "target_created": target_created,
@@ -1178,6 +1206,20 @@ def _placeholder_findings(target: dict, entries: list[ParsedEntry], canonical: d
                 }
             )
     return findings
+
+
+def _staged_parse_finding(*, target: dict, message: str) -> dict:
+    return {
+        "stable_id": "|".join([target["path"], "staged_parse_error"]),
+        "severity": "blocking",
+        "category": "parser",
+        "failure_category": "staged_parse_error",
+        "path": target["path"],
+        "locale": target["locale"],
+        "localization_id": target["localization_id"],
+        "code": "staged_parse_error",
+        "message": f"staged target output could not be parsed: {message}",
+    }
 
 
 def _glossary_findings(

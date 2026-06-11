@@ -112,7 +112,52 @@ Validation reports:
 
 An imported partial corpus usually validates with `missing_key` findings. That is a useful baseline, not necessarily a bad project state.
 
-## 6. Prepare Context
+## 6. Lint Target Quality
+
+Use lint when the files are structurally valid but you want a release-polish audit before sharing them with reviewers or shipping them.
+
+```sh
+PYTHONPATH=src python3 -m parley lint audit \
+  --project-root "/path/to/App/parley"
+```
+
+The default `basic` profile focuses on high-confidence issues:
+
+- parseability
+- missing or extra keys
+- placeholder drift
+- mojibake or replacement-character encoding artifacts
+
+The default scope is `files`, which is the right pre-share check for localization files. Use `--scope all` to include translation memory records, or `--scope tm` to inspect TM only.
+
+For noisier translation-quality hints, use:
+
+```sh
+PYTHONPATH=src python3 -m parley lint audit \
+  --project-root "/path/to/App/parley" \
+  --profile release
+```
+
+The `release` profile also warns about source-equals-target strings and newline-count changes.
+
+For mechanical repairs, dry-run first:
+
+```sh
+PYTHONPATH=src python3 -m parley lint fix \
+  --project-root "/path/to/App/parley" \
+  --dry-run
+```
+
+Then apply:
+
+```sh
+PYTHONPATH=src python3 -m parley lint fix \
+  --project-root "/path/to/App/parley"
+```
+
+`lint fix` is intentionally conservative. It applies only high-confidence encoding fixes such as `BiztonsÃ¡gi kÃ³d` to `Biztonsági kód` or mangled smart quotes to proper Unicode quotes. It updates affected target files and matching current TM records, then re-audits before writing the report.
+
+## 7. Prepare Context
 
 `project init` creates blank context slots. Context-aware translation requires those entries to be populated.
 
@@ -125,7 +170,7 @@ PYTHONPATH=src python3 -m parley context validate \
 
 Populate `context-anchor.yaml` manually with concise per-key descriptions. If context is not appropriate for the run, use `--no-context`; Parley will record `context_mode: disabled` in the translation report.
 
-## 7. Prepare A Glossary
+## 8. Prepare A Glossary
 
 Create or refresh a glossary skeleton:
 
@@ -160,7 +205,7 @@ PYTHONPATH=src python3 -m parley glossary suggest \
 
 Suggestions do not affect translation until promoted into `glossary.yaml`.
 
-## 8. Translate One Target
+## 9. Translate One Target
 
 Dry-run first:
 
@@ -171,6 +216,7 @@ PYTHONPATH=src python3 -m parley translate \
   --target-path "/path/to/App/fr.lproj/Localizable.strings" \
   --reuse-mode tm_then_provider \
   --write-order authoritative \
+  --target-conflict-mode preserve_target \
   --dry-run
 ```
 
@@ -182,12 +228,15 @@ PYTHONPATH=src python3 -m parley translate \
   --target-locale fr-FR \
   --target-path "/path/to/App/fr.lproj/Localizable.strings" \
   --reuse-mode tm_then_provider \
-  --write-order authoritative
+  --write-order authoritative \
+  --target-conflict-mode preserve_target
 ```
 
 `--write-order authoritative` writes target entries in authoritative source-file key order. It preserves entry order only; comments and formatting are normalized by parser adapters.
 
-## 9. Translate All Targets
+`--target-conflict-mode preserve_target` is useful for established production target files. When an approved or locked TM entry differs from an existing target-file value, Parley preserves the target-file value and reports the key as `target_preserved` instead of failing. Missing target keys can still be filled from TM or a provider.
+
+## 10. Translate All Targets
 
 Dry-run all registered targets:
 
@@ -196,6 +245,7 @@ PYTHONPATH=src python3 -m parley translate-batch \
   --project-root "/path/to/App/parley" \
   --reuse-mode tm_then_provider \
   --write-order authoritative \
+  --target-conflict-mode preserve_target \
   --dry-run
 ```
 
@@ -205,7 +255,8 @@ Apply:
 PYTHONPATH=src python3 -m parley translate-batch \
   --project-root "/path/to/App/parley" \
   --reuse-mode tm_then_provider \
-  --write-order authoritative
+  --write-order authoritative \
+  --target-conflict-mode preserve_target
 ```
 
 Restrict a batch:
@@ -217,12 +268,13 @@ PYTHONPATH=src python3 -m parley translate-batch \
   --target-locale de-DE \
   --reuse-mode tm_then_provider \
   --write-order authoritative \
+  --target-conflict-mode preserve_target \
   --dry-run
 ```
 
 Batch translation writes one per-target translation report plus one `translate_batch` roll-up report.
 
-## 10. Reuse Modes
+## 11. Reuse Modes
 
 - `tm_only`: never call a provider. Missing TM candidates become failed outcomes.
 - `tm_then_provider`: reuse TM where possible, call provider for the remaining keys.
@@ -230,11 +282,14 @@ Batch translation writes one per-target translation report plus one `translate_b
 
 For existing production corpora, `tm_then_provider` is usually the right mode.
 
-## 11. Reports
+For production corpora where the checked-in target files are the source of truth, combine `tm_then_provider` with `--target-conflict-mode preserve_target`.
+
+## 12. Reports
 
 Reports are written under:
 
 - `reports/validation/`
+- `reports/lint/`
 - `reports/translation/`
 - `reports/translation_memory/`
 - `reports/glossary/`

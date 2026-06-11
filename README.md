@@ -14,7 +14,7 @@ It turns a localization directory into a durable project with an authoritative s
 - Reuses approved/imported TM before calling a provider.
 - Supports `dummy`, `command-json`, Codex CLI, and Claude Code provider wrappers.
 - Applies glossary constraints during provider-backed translation.
-- Writes JSON reports for validation, TM import, translation, glossary, and context checks.
+- Writes JSON reports for validation, lint, TM import, translation, glossary, and context checks.
 - Supports dry-run workflows before mutating target files or TM.
 
 ## Core Concepts
@@ -77,6 +77,7 @@ PYTHONPATH=src python3 -m parley translate \
   --target-path "/path/to/App/fr.lproj/Localizable.strings" \
   --reuse-mode tm_then_provider \
   --write-order authoritative \
+  --target-conflict-mode preserve_target \
   --dry-run
 ```
 
@@ -89,6 +90,7 @@ PYTHONPATH=src python3 -m parley translate-batch \
   --project-root "/path/to/App/parley" \
   --reuse-mode tm_then_provider \
   --write-order authoritative \
+  --target-conflict-mode preserve_target \
   --dry-run
 ```
 
@@ -103,6 +105,31 @@ PYTHONPATH=src python3 -m parley validate \
 ```
 
 Validation reports missing keys, extra keys, placeholder mismatches, parse errors, IO errors, and glossary findings.
+
+### Lint Release Polish
+
+Run a high-signal lint audit before sharing or shipping generated targets:
+
+```sh
+PYTHONPATH=src python3 -m parley lint audit \
+  --project-root "/path/to/App/parley"
+```
+
+`lint audit` reports localization polish issues such as mojibake/encoding artifacts, coverage drift, and placeholder drift under `reports/lint/`.
+By default it audits localization files only. Use `--scope all` to include translation memory records.
+
+Apply only high-confidence mechanical fixes, such as mojibake repair, with a dry-run first:
+
+```sh
+PYTHONPATH=src python3 -m parley lint fix \
+  --project-root "/path/to/App/parley" \
+  --dry-run
+
+PYTHONPATH=src python3 -m parley lint fix \
+  --project-root "/path/to/App/parley"
+```
+
+`lint fix` updates affected target files and matching current TM records, then re-audits before writing its report.
 
 ## Provider Configuration
 

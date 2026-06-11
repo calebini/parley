@@ -133,14 +133,48 @@ def _serialize_android_xml(entries: list[ParsedEntry], *, sort_keys: bool) -> st
 
 
 def _decode_quoted(value: str, line_number: int) -> str:
+    def replace_escape(match: re.Match[str]) -> str:
+        token = match.group(1)
+        simple = {
+            '"': '"',
+            "\\": "\\",
+            "/": "/",
+            "n": "\n",
+            "r": "\r",
+            "t": "\t",
+            "f": "\f",
+            "v": "\v",
+        }
+        if token in simple:
+            return simple[token]
+        if token.startswith("u") and len(token) == 5:
+            return chr(int(token[1:], 16))
+        if token.startswith("U") and len(token) == 9:
+            return chr(int(token[1:], 16))
+        if token.startswith("x") and len(token) == 3:
+            return chr(int(token[1:], 16))
+        return token
+
     try:
-        return bytes(value, "utf-8").decode("unicode_escape")
-    except UnicodeDecodeError as exc:
+        return re.sub(r"\\(u[0-9A-Fa-f]{4}|U[0-9A-Fa-f]{8}|x[0-9A-Fa-f]{2}|.)", replace_escape, value)
+    except ValueError as exc:
         raise ParserError(f"invalid string escape at line {line_number}") from exc
 
 
 def _encode_ios_string(value: str) -> str:
-    return value.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
+    replacements = {
+        "\\": "\\\\",
+        '"': '\\"',
+        "\n": "\\n",
+        "\r": "\\r",
+        "\t": "\\t",
+        "\f": "\\f",
+        "\v": "\\v",
+        "\u0085": "\\u0085",
+        "\u2028": "\\u2028",
+        "\u2029": "\\u2029",
+    }
+    return "".join(replacements.get(char, char) for char in value)
 
 
 def _encode_xml_attr(value: str) -> str:
